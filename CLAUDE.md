@@ -60,6 +60,74 @@ The `main` branch is protected. All changes must go through pull requests.
 - Check `~/.local/share/vga-events/` for snapshot files
 - Use `--refresh` to reset state for testing
 
+## Twitter Bot
+
+The project includes a Twitter notification system that automatically posts new events.
+
+### Components
+
+- **vga-events-twitter** - CLI tool that reads event JSON and posts to Twitter
+- **internal/notifier** - Package with Twitter client and formatting logic
+- **.github/workflows/twitter-bot.yml** - GitHub Actions workflow for automation
+
+### Local Development
+
+Test the Twitter notifier locally:
+
+```bash
+# Build both tools
+make build
+go build -o vga-events-twitter ./cmd/vga-events-twitter
+
+# Set Twitter credentials
+export TWITTER_API_KEY=xxx
+export TWITTER_API_SECRET=xxx
+export TWITTER_ACCESS_TOKEN=xxx
+export TWITTER_ACCESS_SECRET=xxx
+
+# Test with dry-run (no actual posting) - checks ALL states
+./vga-events --check-state all --format json | ./vga-events-twitter --dry-run
+
+# Post to Twitter - checks ALL states
+./vga-events --check-state all --format json | ./vga-events-twitter
+
+# Or test with a single state first
+./vga-events --check-state NV --format json | ./vga-events-twitter --dry-run
+```
+
+### GitHub Actions Setup
+
+The automated workflow requires these repository secrets:
+- `TWITTER_API_KEY`
+- `TWITTER_API_SECRET`
+- `TWITTER_ACCESS_TOKEN`
+- `TWITTER_ACCESS_SECRET`
+
+Add secrets via: Repository Settings → Secrets and variables → Actions → New repository secret
+
+### Testing the Workflow
+
+**Manual trigger:**
+```bash
+# Via GitHub UI: Actions → Twitter Event Notifications → Run workflow
+
+# Via CLI
+gh workflow run twitter-bot.yml
+```
+
+**View workflow runs:**
+```bash
+gh run list --workflow=twitter-bot.yml
+gh run view <run-id>
+```
+
+### Snapshot Storage
+
+The GitHub Actions workflow uses GitHub Actions cache to persist snapshots between runs:
+- Cache key: `vga-events-snapshots-*`
+- Location: `.snapshots/` directory
+- Restored before each run, saved after completion
+
 ## Releases
 
 Releases are automated using GoReleaser and published to the Homebrew tap.
