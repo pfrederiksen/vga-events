@@ -27,6 +27,14 @@ var (
 	flagRefresh    bool
 	flagVerbose    bool
 	flagShowAll    bool
+	flagVersion    bool
+	flagSort       string
+)
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 // NewRootCmd creates the root command
@@ -46,8 +54,23 @@ Tracks events across runs and reports only new events since last check.`,
 	cmd.Flags().BoolVar(&flagRefresh, "refresh", false, "Refresh snapshot without showing new events")
 	cmd.Flags().BoolVar(&flagVerbose, "verbose", false, "Enable verbose logging")
 	cmd.Flags().BoolVar(&flagShowAll, "show-all", false, "Show all events, not just new ones")
+	cmd.Flags().StringVar(&flagSort, "sort", "date", "Sort order: date, state, or title")
+	cmd.Flags().BoolVarP(&flagVersion, "version", "v", false, "Print version information")
 
-	cmd.MarkFlagRequired("check-state")
+	// Make check-state optional if version is requested
+	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+		if flagVersion {
+			fmt.Printf("vga-events version %s\n", version)
+			fmt.Printf("commit: %s\n", commit)
+			fmt.Printf("built: %s\n", date)
+			os.Exit(ExitSuccess)
+		}
+		// Validate check-state is provided if not version
+		if flagCheckState == "" {
+			return fmt.Errorf("--check-state is required")
+		}
+		return nil
+	}
 
 	return cmd
 }
@@ -70,7 +93,7 @@ func filterEventsByState(events []*event.Event, state string) []*event.Event {
 }
 
 // handleShowAll handles the --show-all flag to display all events
-func handleShowAll(currentEvents []*event.Event, state string, format OutputFormat, verbose bool, store *storage.Storage) error {
+func handleShowAll(currentEvents []*event.Event, state string, format OutputFormat, verbose bool, sortOrder SortOrder, store *storage.Storage) error {
 	// Filter events by state
 	filteredEvents := make([]*event.Event, 0)
 	stateMap := make(map[string][]*event.Event)
@@ -89,6 +112,16 @@ func handleShowAll(currentEvents []*event.Event, state string, format OutputForm
 				stateMap[evt.State] = make([]*event.Event, 0)
 			}
 			stateMap[evt.State] = append(stateMap[evt.State], evt)
+		}
+	}
+
+	// Sort events
+	sortEvents(filteredEvents, sortOrder)
+
+	// Sort events within each state group
+	if state == StateAll {
+		for _, events := range stateMap {
+			sortEvents(events, sortOrder)
 		}
 	}
 
@@ -152,9 +185,16 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid format: %s (must be 'text' or 'json')", flagFormat)
 	}
 
+	// Validate sort order
+	sortOrder := SortOrder(strings.ToLower(flagSort))
+	if sortOrder != SortByDate && sortOrder != SortByState && sortOrder != SortByTitle {
+		return fmt.Errorf("invalid sort order: %s (must be 'date', 'state', or 'title')", flagSort)
+	}
+
 	if flagVerbose {
 		fmt.Fprintf(os.Stderr, "Checking state: %s\n", state)
 		fmt.Fprintf(os.Stderr, "Data directory: %s\n", flagDataDir)
+		fmt.Fprintf(os.Stderr, "Sort order: %s\n", sortOrder)
 	}
 
 	// Initialize storage
@@ -182,7 +222,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	// Handle --show-all mode
 	if flagShowAll {
-		return handleShowAll(currentEvents, state, format, flagVerbose, store)
+		return handleShowAll(currentEvents, state, format, flagVerbose, sortOrder, store)
 	}
 
 	// Load previous snapshot
@@ -200,6 +240,16 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	// Compute diff
 	diff := event.Diff(previous, currentEvents, state)
+
+	// Sort new events
+	sortEvents(diff.NewEvents, sortOrder)
+
+	// Sort events within each state group
+	if state == StateAll {
+		for _, events := range diff.States {
+			sortEvents(events, sortOrder)
+		}
+	}
 
 	// Filter events by state before saving snapshot
 	eventsToSave := filterEventsByState(currentEvents, state)
@@ -268,7 +318,12 @@ func runCheck(cmd *cobra.Command, args []string) error {
 }
 
 // Execute runs the CLI
-func Execute() {
+func Execute(v, c, d string) {
+	// Set version information
+	version = v
+	commit = c
+	date = d
+
 	if err := NewRootCmd().Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(ExitError)
