@@ -16,7 +16,6 @@ go.work
 
 # Binary output
 /vga-events
-/vga-events-twitter
 /bin/
 
 # IDE
@@ -33,6 +32,3 @@ Thumbs.db
 # Test data (keep fixtures)
 testdata/*.json
 !testdata/fixtures/
-
-# Snapshots (GitHub Actions cache)
-.snapshots/

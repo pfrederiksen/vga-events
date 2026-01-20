@@ -76,6 +76,4 @@ jobs:
       run: go mod download
 
     - name: Build
-      run: |
-        go build -v ./cmd/vga-events
-        go build -v ./cmd/vga-events-twitter
+      run: go build -v ./cmd/vga-events

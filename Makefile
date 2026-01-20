@@ -1,9 +1,8 @@
 .PHONY: build test lint clean install help
 
-# Build the binaries
+# Build the binary
 build:
 	go build -o vga-events ./cmd/vga-events
-	go build -o vga-events-twitter ./cmd/vga-events-twitter
 
 # Run tests
 test:
@@ -19,8 +18,8 @@ lint:
 
 # Clean build artifacts
 clean:
-	rm -f vga-events vga-events-twitter coverage.out
-	rm -rf bin/ .snapshots/
+	rm -f vga-events coverage.out
+	rm -rf bin/
 
 # Install the binary to $GOPATH/bin
 install:
