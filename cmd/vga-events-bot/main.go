@@ -204,9 +204,14 @@ func runOnce(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 	fmt.Printf("Processing %d message(s)...\n", len(updates))
 
 	prefsModified := false
+	maxUpdateID := 0
 
 	// Process each update
 	for _, update := range updates {
+		// Track the highest update ID for acknowledgment
+		if update.UpdateID > maxUpdateID {
+			maxUpdateID = update.UpdateID
+		}
 		chatID := fmt.Sprintf("%d", update.Message.Chat.ID)
 		text := strings.TrimSpace(update.Message.Text)
 
@@ -267,6 +272,17 @@ func runOnce(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 		}
 	} else {
 		fmt.Println("No preference changes to save")
+	}
+
+	// Acknowledge processed messages by calling getUpdates with next offset
+	// This prevents reprocessing the same messages on the next run
+	if maxUpdateID > 0 && !dryRun {
+		_, err := getUpdates(botToken, maxUpdateID+1)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to acknowledge processed messages: %v\n", err)
+		} else {
+			fmt.Printf("Acknowledged %d processed message(s)\n", len(updates))
+		}
 	}
 }
 
@@ -373,11 +389,12 @@ func handleSubscribe(prefs preferences.Preferences, chatID, state string, modifi
 
 			if len(initialEvents) > 0 {
 				// Limit to 10 initial events
-				if len(initialEvents) > 10 {
+				totalEvents := len(initialEvents)
+				if totalEvents > 10 {
 					initialEvents = initialEvents[:10]
-					response += fmt.Sprintf("📨 Sending you the first 10 of %d current events...", len(initialEvents))
+					response += fmt.Sprintf("📨 Sending you the first 10 of %d current events...", totalEvents)
 				} else {
-					response += fmt.Sprintf("📨 Sending you %d current event(s)...", len(initialEvents))
+					response += fmt.Sprintf("📨 Sending you %d current event(s)...", totalEvents)
 				}
 			} else {
 				response += "ℹ️ No current events found for this state."
