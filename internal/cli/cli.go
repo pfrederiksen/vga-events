@@ -50,6 +50,23 @@ Tracks events across runs and reports only new events since last check.`,
 	return cmd
 }
 
+// filterEventsByState filters events by state code
+func filterEventsByState(events []*event.Event, state string) []*event.Event {
+	// If checking all states, return all events
+	if state == "ALL" {
+		return events
+	}
+
+	// Filter for specific state
+	filtered := make([]*event.Event, 0)
+	for _, evt := range events {
+		if strings.EqualFold(evt.State, state) {
+			filtered = append(filtered, evt)
+		}
+	}
+	return filtered
+}
+
 // handleShowAll handles the --show-all flag to display all events
 func handleShowAll(currentEvents []*event.Event, state string, format OutputFormat, verbose bool, store *storage.Storage) error {
 	// Filter events by state
@@ -73,8 +90,11 @@ func handleShowAll(currentEvents []*event.Event, state string, format OutputForm
 		}
 	}
 
-	// Save snapshot
-	if err := store.CreateSnapshotFromEvents(currentEvents, state); err != nil {
+	// Filter events by state before saving snapshot
+	eventsToSave := filterEventsByState(currentEvents, state)
+
+	// Save snapshot with only the filtered events
+	if err := store.CreateSnapshotFromEvents(eventsToSave, state); err != nil {
 		return fmt.Errorf("saving snapshot: %w", err)
 	}
 
@@ -179,8 +199,11 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Compute diff
 	diff := event.Diff(previous, currentEvents, state)
 
-	// Save updated snapshot
-	if err := store.CreateSnapshotFromEvents(currentEvents, state); err != nil {
+	// Filter events by state before saving snapshot
+	eventsToSave := filterEventsByState(currentEvents, state)
+
+	// Save updated snapshot with only the filtered events
+	if err := store.CreateSnapshotFromEvents(eventsToSave, state); err != nil {
 		return fmt.Errorf("saving snapshot: %w", err)
 	}
 
