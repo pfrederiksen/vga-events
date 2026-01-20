@@ -90,6 +90,46 @@ func main() {
 	}
 }
 
+// sendResponse sends the response message and optional initial events to a chat
+func sendResponse(botToken, chatID, response string, initialEvents []*event.Event, dryRun bool) {
+	if dryRun {
+		fmt.Printf("[DRY RUN] Would send to %s:\n%s\n\n", chatID, response)
+		if len(initialEvents) > 0 {
+			fmt.Printf("[DRY RUN] Would also send %d initial events\n", len(initialEvents))
+		}
+		return
+	}
+
+	// Send response
+	tempClient, err := telegram.NewClient(botToken, chatID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating client for chat %s: %v\n", chatID, err)
+		return
+	}
+
+	if err := tempClient.SendMessage(response); err != nil {
+		fmt.Fprintf(os.Stderr, "Error sending response to %s: %v\n", chatID, err)
+	} else {
+		fmt.Printf("Sent response to %s\n", chatID)
+	}
+
+	// Send initial events if any
+	if len(initialEvents) > 0 {
+		fmt.Printf("Sending %d initial events to %s...\n", len(initialEvents), chatID)
+		for i, evt := range initialEvents {
+			msg := telegram.FormatEvent(evt)
+			if err := tempClient.SendMessage(msg); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending initial event to %s: %v\n", chatID, err)
+			}
+			// Rate limiting
+			if i < len(initialEvents)-1 {
+				time.Sleep(1 * time.Second)
+			}
+		}
+		fmt.Printf("Sent initial events to %s\n", chatID)
+	}
+}
+
 func runLoop(storage *preferences.GistStorage, prefs preferences.Preferences, botToken string, dryRun bool, duration time.Duration) {
 	fmt.Printf("Starting long polling loop (will run for %v)...\n", duration)
 	startTime := time.Now()
@@ -129,41 +169,8 @@ func runLoop(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 			// Parse command
 			response, initialEvents := processCommand(prefs, chatID, text, &prefsModified, botToken, dryRun)
 
-			if dryRun {
-				fmt.Printf("[DRY RUN] Would send to %s:\n%s\n\n", chatID, response)
-				if len(initialEvents) > 0 {
-					fmt.Printf("[DRY RUN] Would also send %d initial events\n", len(initialEvents))
-				}
-			} else {
-				// Send response
-				tempClient, err := telegram.NewClient(botToken, chatID)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error creating client for chat %s: %v\n", chatID, err)
-					continue
-				}
-
-				if err := tempClient.SendMessage(response); err != nil {
-					fmt.Fprintf(os.Stderr, "Error sending response to %s: %v\n", chatID, err)
-				} else {
-					fmt.Printf("Sent response to %s\n", chatID)
-				}
-
-				// Send initial events if any
-				if len(initialEvents) > 0 {
-					fmt.Printf("Sending %d initial events to %s...\n", len(initialEvents), chatID)
-					for i, evt := range initialEvents {
-						msg := telegram.FormatEvent(evt)
-						if err := tempClient.SendMessage(msg); err != nil {
-							fmt.Fprintf(os.Stderr, "Error sending initial event to %s: %v\n", chatID, err)
-						}
-						// Rate limiting
-						if i < len(initialEvents)-1 {
-							time.Sleep(1 * time.Second)
-						}
-					}
-					fmt.Printf("Sent initial events to %s\n", chatID)
-				}
-			}
+			// Send response and initial events
+			sendResponse(botToken, chatID, response, initialEvents, dryRun)
 
 			// Update offset to mark this message as processed
 			if update.UpdateID >= offset {
@@ -220,41 +227,8 @@ func runOnce(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 		// Parse command
 		response, initialEvents := processCommand(prefs, chatID, text, &prefsModified, botToken, dryRun)
 
-		if dryRun {
-			fmt.Printf("[DRY RUN] Would send to %s:\n%s\n\n", chatID, response)
-			if len(initialEvents) > 0 {
-				fmt.Printf("[DRY RUN] Would also send %d initial events\n", len(initialEvents))
-			}
-		} else {
-			// Send response
-			tempClient, err := telegram.NewClient(botToken, chatID)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error creating client for chat %s: %v\n", chatID, err)
-				continue
-			}
-
-			if err := tempClient.SendMessage(response); err != nil {
-				fmt.Fprintf(os.Stderr, "Error sending response to %s: %v\n", chatID, err)
-			} else {
-				fmt.Printf("Sent response to %s\n", chatID)
-			}
-
-			// Send initial events if any
-			if len(initialEvents) > 0 {
-				fmt.Printf("Sending %d initial events to %s...\n", len(initialEvents), chatID)
-				for i, evt := range initialEvents {
-					msg := telegram.FormatEvent(evt)
-					if err := tempClient.SendMessage(msg); err != nil {
-						fmt.Fprintf(os.Stderr, "Error sending initial event to %s: %v\n", chatID, err)
-					}
-					// Rate limiting
-					if i < len(initialEvents)-1 {
-						time.Sleep(1 * time.Second)
-					}
-				}
-				fmt.Printf("Sent initial events to %s\n", chatID)
-			}
-		}
+		// Send response and initial events
+		sendResponse(botToken, chatID, response, initialEvents, dryRun)
 	}
 
 	// Save preferences if modified
