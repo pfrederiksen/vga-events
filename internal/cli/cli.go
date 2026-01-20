@@ -17,7 +17,7 @@ const (
 	ExitError     = 1
 	ExitNewEvents = 2
 
-	StateAll = "StateAll"
+	StateAll = "ALL"
 )
 
 var (
