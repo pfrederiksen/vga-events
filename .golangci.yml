@@ -1,0 +1,39 @@
+linters-settings:
+  gocyclo:
+    min-complexity: 28
+  dupl:
+    threshold: 100
+  goconst:
+    min-len: 3
+    min-occurrences: 5
+  errcheck:
+    exclude-functions:
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - (*github.com/spf13/cobra.Command).MarkFlagRequired
+      - (io.ReadCloser).Close
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - unconvert
+    - dupl
+    - goconst
+    - gocyclo
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+run:
+  timeout: 5m
