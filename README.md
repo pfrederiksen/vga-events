@@ -109,6 +109,61 @@ if vga-events --check-state all; then
 fi
 ```
 
+## Twitter Notifications
+
+Automatically post new VGA events to Twitter using the companion `vga-events-twitter` tool.
+
+### Setup
+
+1. **Get Twitter API credentials:**
+   - Create a Twitter Developer account at https://developer.twitter.com
+   - Create an app and get API keys
+   - You need: API Key, API Secret, Access Token, Access Secret
+
+2. **Set environment variables:**
+   ```bash
+   export TWITTER_API_KEY=your_api_key
+   export TWITTER_API_SECRET=your_api_secret
+   export TWITTER_ACCESS_TOKEN=your_access_token
+   export TWITTER_ACCESS_SECRET=your_access_secret
+   ```
+
+3. **Test with dry-run:**
+   ```bash
+   vga-events --check-state all --format json | vga-events-twitter --dry-run
+   ```
+
+4. **Post to Twitter:**
+   ```bash
+   vga-events --check-state all --format json | vga-events-twitter
+   ```
+
+### Options
+
+- `--events-file <path>` - Read from file instead of stdin
+- `--dry-run` - Print tweets without posting
+- `--max-tweets <n>` - Limit number of tweets (default: 10)
+- `--state <STATE>` - Only tweet events for specific state
+
+### Automated Posting (GitHub Actions)
+
+This repository includes a GitHub Actions workflow that:
+- Runs daily at 8 AM UTC
+- Checks for new events
+- Posts to Twitter automatically
+- Can be manually triggered
+
+To enable:
+1. Fork the repository
+2. Add Twitter credentials as repository secrets:
+   - `TWITTER_API_KEY`
+   - `TWITTER_API_SECRET`
+   - `TWITTER_ACCESS_TOKEN`
+   - `TWITTER_ACCESS_SECRET`
+3. Enable GitHub Actions in your fork
+
+The workflow is defined in `.github/workflows/twitter-bot.yml`
+
 ## How It Works
 
 1. Fetches the public state events page from vgagolf.org
@@ -116,6 +171,7 @@ fi
 3. Generates deterministic IDs for each event
 4. Compares with previous snapshot
 5. Reports new events and saves updated snapshot
+6. Optionally posts to Twitter via `vga-events-twitter`
 
 ## Development
 
