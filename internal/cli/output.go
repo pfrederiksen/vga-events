@@ -88,11 +88,11 @@ func writeText(w io.Writer, result *OutputResult, verbose bool) error {
 				} else {
 					fmt.Fprintf(w, "  %s\n", evt.Raw)
 				}
+				if evt.DateText != "" {
+					fmt.Fprintf(w, "       Date: %s\n", evt.DateText)
+				}
 				if verbose {
 					fmt.Fprintf(w, "       ID: %s\n", evt.ID)
-					if evt.DateText != "" {
-						fmt.Fprintf(w, "       Date: %s\n", evt.DateText)
-					}
 					if evt.City != "" {
 						fmt.Fprintf(w, "       City: %s\n", evt.City)
 					}
@@ -108,11 +108,11 @@ func writeText(w io.Writer, result *OutputResult, verbose bool) error {
 			} else {
 				fmt.Fprintf(w, "%s: %s\n", evt.State, evt.Raw)
 			}
+			if evt.DateText != "" {
+				fmt.Fprintf(w, "     Date: %s\n", evt.DateText)
+			}
 			if verbose {
 				fmt.Fprintf(w, "     ID: %s\n", evt.ID)
-				if evt.DateText != "" {
-					fmt.Fprintf(w, "     Date: %s\n", evt.DateText)
-				}
 				if evt.City != "" {
 					fmt.Fprintf(w, "     City: %s\n", evt.City)
 				}
