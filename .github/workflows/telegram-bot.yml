@@ -1,0 +1,88 @@
+name: Telegram Event Notifications
+
+on:
+  schedule:
+    # Run every hour at the top of the hour
+    - cron: '0 * * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: read
+
+jobs:
+  check-and-notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build tools
+        run: |
+          go build -o vga-events ./cmd/vga-events
+          go build -o vga-events-telegram ./cmd/vga-events-telegram
+
+      - name: Restore snapshots cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .snapshots
+          key: vga-events-snapshots-${{ github.run_id }}
+          restore-keys: |
+            vga-events-snapshots-
+
+      - name: Check for new events
+        id: check
+        run: |
+          # Create snapshots directory
+          mkdir -p .snapshots
+
+          # Run vga-events and capture exit code
+          set +e
+          ./vga-events --check-state all --format json --data-dir .snapshots > events.json
+          EXIT_CODE=$?
+          set -e
+
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -eq 2 ]; then
+            echo "new_events=true" >> $GITHUB_OUTPUT
+            echo "New events found!"
+          else
+            echo "new_events=false" >> $GITHUB_OUTPUT
+            echo "No new events found."
+          fi
+
+      - name: Send Telegram notifications
+        if: steps.check.outputs.new_events == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          ./vga-events-telegram --events-file events.json --max-messages 10
+
+      - name: Save snapshots cache
+        if: steps.check.outputs.exit_code != '1'
+        uses: actions/cache/save@v4
+        with:
+          path: .snapshots
+          key: vga-events-snapshots-${{ github.run_id }}
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.check.outputs.new_events }}" == "true" ]; then
+            echo "✅ Found new events and sent Telegram notifications"
+          elif [ "${{ steps.check.outputs.exit_code }}" == "1" ]; then
+            echo "❌ Error checking for events"
+            exit 1
+          else
+            echo "ℹ️ No new events found"
+          fi

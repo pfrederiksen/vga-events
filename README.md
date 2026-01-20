@@ -109,6 +109,78 @@ if vga-events --check-state all; then
 fi
 ```
 
+## Telegram Notifications
+
+Automatically receive new VGA events via Telegram using the companion `vga-events-telegram` tool.
+
+### Setup
+
+1. **Create a Telegram bot:**
+   - Message @BotFather on Telegram
+   - Send `/newbot` and follow instructions
+   - Save your bot token (looks like `1234567890:ABCdefGHIjklMNOpqrsTUVwxyz`)
+
+2. **Get your Chat ID:**
+   - Start a conversation with your bot
+   - Send any message to it
+   - Visit `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
+   - Find your chat ID in the response (looks like `123456789`)
+
+3. **Set environment variables:**
+   ```bash
+   export TELEGRAM_BOT_TOKEN=your_bot_token_here
+   export TELEGRAM_CHAT_ID=your_chat_id_here
+   ```
+
+4. **Test with dry-run:**
+   ```bash
+   vga-events --check-state all --format json | vga-events-telegram --dry-run
+   ```
+
+5. **Send real notifications:**
+   ```bash
+   vga-events --check-state all --format json | vga-events-telegram
+   ```
+
+### Command Options
+
+- `--bot-token <token>` - Telegram bot token (or env: TELEGRAM_BOT_TOKEN)
+- `--chat-id <id>` - Telegram chat ID (or env: TELEGRAM_CHAT_ID)
+- `--events-file <path>` - Read from file instead of stdin
+- `--dry-run` - Print messages without sending
+- `--max-messages <n>` - Limit number of messages (default: 10)
+- `--state <STATE>` - Only send messages for specific state
+
+### Automated Notifications (GitHub Actions)
+
+This repository includes a GitHub Actions workflow that:
+- Runs every hour (at the top of the hour)
+- Checks all states for new events
+- Sends Telegram notifications automatically (max 10 per run)
+- Can be manually triggered
+
+To enable:
+1. Add repository secrets (Settings → Secrets and variables → Actions):
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_CHAT_ID`
+2. The workflow will automatically run every hour
+
+The workflow is defined in `.github/workflows/telegram-bot.yml`
+
+### Interactive Usage
+
+You can also run checks manually anytime:
+```bash
+# Check Nevada events and notify
+vga-events --check-state NV --format json | vga-events-telegram
+
+# Check all states
+vga-events --check-state all --format json | vga-events-telegram
+
+# Dry run to see what would be sent
+vga-events --check-state all --format json | vga-events-telegram --dry-run
+```
+
 ## How It Works
 
 1. Fetches the public state events page from vgagolf.org
