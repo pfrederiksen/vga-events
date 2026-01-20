@@ -21,6 +21,8 @@ var (
 	gistID      = flag.String("gist-id", os.Getenv("TELEGRAM_GIST_ID"), "GitHub Gist ID (or env: TELEGRAM_GIST_ID)")
 	githubToken = flag.String("github-token", os.Getenv("TELEGRAM_GITHUB_TOKEN"), "GitHub token (or env: TELEGRAM_GITHUB_TOKEN)")
 	dryRun      = flag.Bool("dry-run", false, "Show what would be done without making changes")
+	loop        = flag.Bool("loop", false, "Run continuously with long polling (for real-time responses)")
+	loopDuration = flag.Duration("loop-duration", 5*time.Hour+50*time.Minute, "Maximum duration for loop mode (default 5h50m)")
 )
 
 type Update struct {
@@ -81,8 +83,114 @@ func main() {
 
 	fmt.Printf("Loaded preferences for %d users\n", len(prefs))
 
+	if *loop {
+		runLoop(storage, prefs, *botToken, *dryRun, *loopDuration)
+	} else {
+		runOnce(storage, prefs, *botToken, *dryRun)
+	}
+}
+
+func runLoop(storage *preferences.GistStorage, prefs preferences.Preferences, botToken string, dryRun bool, duration time.Duration) {
+	fmt.Printf("Starting long polling loop (will run for %v)...\n", duration)
+	startTime := time.Now()
+	offset := 0
+
+	for {
+		// Check if we've exceeded our time limit
+		if time.Since(startTime) >= duration {
+			fmt.Printf("Reached time limit (%v), exiting gracefully...\n", duration)
+			break
+		}
+
+		// Get updates with long polling (30 second timeout)
+		updates, err := getUpdatesWithTimeout(botToken, offset, 30)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting updates: %v\n", err)
+			time.Sleep(5 * time.Second) // Brief pause before retrying
+			continue
+		}
+
+		if len(updates) == 0 {
+			// No new messages, continue polling
+			continue
+		}
+
+		fmt.Printf("Processing %d message(s)...\n", len(updates))
+
+		prefsModified := false
+
+		// Process each update
+		for _, update := range updates {
+			chatID := fmt.Sprintf("%d", update.Message.Chat.ID)
+			text := strings.TrimSpace(update.Message.Text)
+
+			fmt.Printf("Message from %s (chat %s): %s\n", update.Message.From.FirstName, chatID, text)
+
+			// Parse command
+			response, initialEvents := processCommand(prefs, chatID, text, &prefsModified, botToken, dryRun)
+
+			if dryRun {
+				fmt.Printf("[DRY RUN] Would send to %s:\n%s\n\n", chatID, response)
+				if len(initialEvents) > 0 {
+					fmt.Printf("[DRY RUN] Would also send %d initial events\n", len(initialEvents))
+				}
+			} else {
+				// Send response
+				tempClient, err := telegram.NewClient(botToken, chatID)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error creating client for chat %s: %v\n", chatID, err)
+					continue
+				}
+
+				if err := tempClient.SendMessage(response); err != nil {
+					fmt.Fprintf(os.Stderr, "Error sending response to %s: %v\n", chatID, err)
+				} else {
+					fmt.Printf("Sent response to %s\n", chatID)
+				}
+
+				// Send initial events if any
+				if len(initialEvents) > 0 {
+					fmt.Printf("Sending %d initial events to %s...\n", len(initialEvents), chatID)
+					for i, evt := range initialEvents {
+						msg := telegram.FormatEvent(evt)
+						if err := tempClient.SendMessage(msg); err != nil {
+							fmt.Fprintf(os.Stderr, "Error sending initial event to %s: %v\n", chatID, err)
+						}
+						// Rate limiting
+						if i < len(initialEvents)-1 {
+							time.Sleep(1 * time.Second)
+						}
+					}
+					fmt.Printf("Sent initial events to %s\n", chatID)
+				}
+			}
+
+			// Update offset to mark this message as processed
+			if update.UpdateID >= offset {
+				offset = update.UpdateID + 1
+			}
+		}
+
+		// Save preferences if modified
+		if prefsModified {
+			if dryRun {
+				fmt.Println("[DRY RUN] Would save updated preferences to Gist")
+			} else {
+				if err := storage.Save(prefs); err != nil {
+					fmt.Fprintf(os.Stderr, "Error saving preferences: %v\n", err)
+				} else {
+					fmt.Println("Preferences saved successfully")
+				}
+			}
+		}
+	}
+
+	fmt.Println("Long polling loop completed")
+}
+
+func runOnce(storage *preferences.GistStorage, prefs preferences.Preferences, botToken string, dryRun bool) {
 	// Get updates from Telegram
-	updates, err := getUpdates(*botToken, 0)
+	updates, err := getUpdates(botToken, 0)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting updates: %v\n", err)
 		os.Exit(1)
@@ -105,16 +213,16 @@ func main() {
 		fmt.Printf("Message from %s (chat %s): %s\n", update.Message.From.FirstName, chatID, text)
 
 		// Parse command
-		response, initialEvents := processCommand(prefs, chatID, text, &prefsModified, *botToken, *dryRun)
+		response, initialEvents := processCommand(prefs, chatID, text, &prefsModified, botToken, dryRun)
 
-		if *dryRun {
+		if dryRun {
 			fmt.Printf("[DRY RUN] Would send to %s:\n%s\n\n", chatID, response)
 			if len(initialEvents) > 0 {
 				fmt.Printf("[DRY RUN] Would also send %d initial events\n", len(initialEvents))
 			}
 		} else {
 			// Send response
-			tempClient, err := telegram.NewClient(*botToken, chatID)
+			tempClient, err := telegram.NewClient(botToken, chatID)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error creating client for chat %s: %v\n", chatID, err)
 				continue
@@ -146,7 +254,7 @@ func main() {
 
 	// Save preferences if modified
 	if prefsModified {
-		if *dryRun {
+		if dryRun {
 			fmt.Println("[DRY RUN] Would save updated preferences to Gist")
 			prefsJSON, _ := prefs.ToJSON()
 			fmt.Printf("Updated preferences:\n%s\n", string(prefsJSON))
@@ -337,12 +445,32 @@ Use /list to see your current subscriptions.`
 }
 
 func getUpdates(botToken string, offset int) ([]Update, error) {
+	return getUpdatesWithTimeout(botToken, offset, 0)
+}
+
+func getUpdatesWithTimeout(botToken string, offset int, timeoutSeconds int) ([]Update, error) {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates", botToken)
+	params := []string{}
+
 	if offset > 0 {
-		url += fmt.Sprintf("?offset=%d", offset)
+		params = append(params, fmt.Sprintf("offset=%d", offset))
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	if timeoutSeconds > 0 {
+		params = append(params, fmt.Sprintf("timeout=%d", timeoutSeconds))
+	}
+
+	if len(params) > 0 {
+		url += "?" + strings.Join(params, "&")
+	}
+
+	// Add extra time to HTTP client timeout to account for Telegram's long polling
+	clientTimeout := time.Duration(timeoutSeconds+10) * time.Second
+	if clientTimeout < 15*time.Second {
+		clientTimeout = 15 * time.Second
+	}
+
+	client := &http.Client{Timeout: clientTimeout}
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("fetching updates: %w", err)

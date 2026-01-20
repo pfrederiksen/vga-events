@@ -2,8 +2,8 @@ name: Process Telegram Bot Commands
 
 on:
   schedule:
-    # Run every 15 minutes
-    - cron: '*/15 * * * *'
+    # Run every 6 hours to ensure continuous coverage
+    - cron: '0 */6 * * *'
   workflow_dispatch:  # Allow manual trigger
 
 permissions:
@@ -28,15 +28,16 @@ jobs:
       - name: Build command processor
         run: go build -o vga-events-bot ./cmd/vga-events-bot
 
-      - name: Process commands
+      - name: Process commands with long polling
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
           TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
         run: |
-          ./vga-events-bot
+          echo "Starting long polling loop (will run for ~5h50m)..."
+          ./vga-events-bot --loop
 
       - name: Summary
         if: always()
         run: |
-          echo "✅ Command processing complete"
+          echo "✅ Long polling session complete"
