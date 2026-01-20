@@ -23,7 +23,6 @@ linters:
     - dupl
     - goconst
     - gocyclo
-    - shadow
 
 issues:
   exclude-use-default: false
