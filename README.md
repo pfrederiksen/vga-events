@@ -7,6 +7,7 @@ A simple, reliable CLI tool to check for newly-added VGA Golf state events witho
 - Check for new events by state (e.g., `NV`) or all states
 - Tracks events across runs using local snapshots
 - Reports only new events since last check
+- View all tracked events with `--show-all`
 - JSON or text output formats
 - Exit codes for easy scripting
 
@@ -46,17 +47,24 @@ Refresh/reset snapshot:
 vga-events --check-state all --refresh
 ```
 
+Show all tracked events (not just new ones):
+```bash
+vga-events --check-state NV --show-all
+vga-events --check-state all --show-all --format json
+```
+
 ### Flags
 
 - `--check-state <STATE|all>` - Required. Check specific state or all states
 - `--format <text|json>` - Output format (default: text)
 - `--data-dir <path>` - Data directory (default: ~/.local/share/vga-events)
 - `--refresh` - Recreate snapshot without showing new events
+- `--show-all` - Show all tracked events, not just new ones
 - `--verbose` - Show debug logs
 
 ### Exit Codes
 
-- `0` - No new events (or --refresh mode)
+- `0` - No new events (or --refresh/--show-all mode)
 - `2` - New events found
 - `1` - Error occurred
 
