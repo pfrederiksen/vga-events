@@ -53,7 +53,7 @@ func TestPreferences(t *testing.T) {
 	// Test GetUser creates user
 	user := prefs.GetUser("456")
 	if user == nil {
-		t.Error("GetUser should create new user")
+		t.Fatal("GetUser should create new user")
 	}
 
 	if !user.Active {
@@ -74,11 +74,11 @@ func TestIsValidState(t *testing.T) {
 		{"CA", true},
 		{"TX", true},
 		{"ALL", true},
-		{"nv", true},  // case insensitive
+		{"nv", true}, // case insensitive
 		{"ca", true},
-		{"ZZ", false}, // invalid
-		{"", false},   // empty
-		{"  NV  ", true},  // whitespace trimmed
+		{"ZZ", false},    // invalid
+		{"", false},      // empty
+		{"  NV  ", true}, // whitespace trimmed
 	}
 
 	for _, tt := range tests {

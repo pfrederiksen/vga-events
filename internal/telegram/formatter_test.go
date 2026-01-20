@@ -113,8 +113,8 @@ func TestFormatSummary(t *testing.T) {
 		contains []string
 	}{
 		{
-			name:  "single event, single state",
-			count: 1,
+			name:   "single event, single state",
+			count:  1,
 			states: []string{"NV"},
 			contains: []string{
 				"<b>1</b> new event",
@@ -124,8 +124,8 @@ func TestFormatSummary(t *testing.T) {
 			},
 		},
 		{
-			name:  "multiple events, multiple states",
-			count: 5,
+			name:   "multiple events, multiple states",
+			count:  5,
 			states: []string{"NV", "CA", "TX"},
 			contains: []string{
 				"<b>5</b> new events",
@@ -135,8 +135,8 @@ func TestFormatSummary(t *testing.T) {
 			},
 		},
 		{
-			name:  "multiple events, no states specified",
-			count: 10,
+			name:   "multiple events, no states specified",
+			count:  10,
 			states: []string{},
 			contains: []string{
 				"<b>10</b> new events",

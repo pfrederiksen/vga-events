@@ -17,11 +17,11 @@ import (
 )
 
 var (
-	botToken    = flag.String("bot-token", os.Getenv("TELEGRAM_BOT_TOKEN"), "Telegram bot token (or env: TELEGRAM_BOT_TOKEN)")
-	gistID      = flag.String("gist-id", os.Getenv("TELEGRAM_GIST_ID"), "GitHub Gist ID (or env: TELEGRAM_GIST_ID)")
-	githubToken = flag.String("github-token", os.Getenv("TELEGRAM_GITHUB_TOKEN"), "GitHub token (or env: TELEGRAM_GITHUB_TOKEN)")
-	dryRun      = flag.Bool("dry-run", false, "Show what would be done without making changes")
-	loop        = flag.Bool("loop", false, "Run continuously with long polling (for real-time responses)")
+	botToken     = flag.String("bot-token", os.Getenv("TELEGRAM_BOT_TOKEN"), "Telegram bot token (or env: TELEGRAM_BOT_TOKEN)")
+	gistID       = flag.String("gist-id", os.Getenv("TELEGRAM_GIST_ID"), "GitHub Gist ID (or env: TELEGRAM_GIST_ID)")
+	githubToken  = flag.String("github-token", os.Getenv("TELEGRAM_GITHUB_TOKEN"), "GitHub token (or env: TELEGRAM_GITHUB_TOKEN)")
+	dryRun       = flag.Bool("dry-run", false, "Show what would be done without making changes")
+	loop         = flag.Bool("loop", false, "Run continuously with long polling (for real-time responses)")
 	loopDuration = flag.Duration("loop-duration", 5*time.Hour+50*time.Minute, "Maximum duration for loop mode (default 5h50m)")
 )
 

@@ -16,8 +16,8 @@ const (
 
 // Client represents a Telegram Bot API client
 type Client struct {
-	botToken string
-	chatID   string
+	botToken   string
+	chatID     string
 	httpClient *http.Client
 }
 
@@ -48,9 +48,9 @@ func (c *Client) SendMessage(text string) error {
 	url := fmt.Sprintf("%s%s/sendMessage", apiBaseURL, c.botToken)
 
 	payload := map[string]interface{}{
-		"chat_id": c.chatID,
-		"text":    text,
-		"parse_mode": "HTML",
+		"chat_id":                  c.chatID,
+		"text":                     text,
+		"parse_mode":               "HTML",
 		"disable_web_page_preview": true,
 	}
 
