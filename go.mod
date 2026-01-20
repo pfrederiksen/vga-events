@@ -3,9 +3,8 @@ module github.com/pfrederiksen/vga-events
 go 1.21
 
 require (
-	github.com/PuerkitoBio/goquery v1.10.1
+	github.com/PuerkitoBio/goquery v1.9.2
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/net v0.23.0
 )
 
 require (
