@@ -60,6 +60,177 @@ The `main` branch is protected. All changes must go through pull requests.
 - Check `~/.local/share/vga-events/` for snapshot files
 - Use `--refresh` to reset state for testing
 
+## Telegram Bot (Interactive + Multi-User)
+
+The project includes an interactive Telegram bot with personalized notifications.
+
+### Architecture
+
+**Three binaries:**
+- **vga-events** - Scrapes and checks for new events
+- **vga-events-telegram** - Sends notifications to Telegram
+- **vga-events-bot** - Processes user commands (/subscribe, /unsubscribe, etc.)
+
+**Three workflows:**
+- **telegram-bot-commands.yml** - Processes commands every 15 minutes
+- **telegram-bot.yml** - Checks for events hourly, sends personalized notifications
+- **ci.yml** - Runs tests and builds on PRs
+
+**Storage:**
+- User preferences stored in private GitHub Gist (JSON)
+- Event snapshots stored in GitHub Actions cache
+- No database needed!
+
+### Components
+
+1. **internal/telegram** - Telegram API client (send messages)
+2. **internal/preferences** - User preference management + Gist storage
+3. **cmd/vga-events-bot** - Command processor (handles /subscribe, etc.)
+4. **cmd/vga-events-telegram** - Notification sender
+5. **.github/workflows/telegram-bot-commands.yml** - Command processing
+6. **.github/workflows/telegram-bot.yml** - Personalized notifications
+
+### Local Development
+
+**Setup:**
+```bash
+# Build all tools
+make build
+
+# Create Gist for testing (using gh CLI)
+echo '{}' | gh gist create --filename "vga-events-preferences.json" --desc "VGA Events Bot Preferences" -
+
+# Alternative: use the helper script
+# ./scripts/create-gist.sh YOUR_GITHUB_TOKEN
+
+# Set environment variables
+export TELEGRAM_BOT_TOKEN=your_bot_token
+export TELEGRAM_GIST_ID=your_gist_id
+export TELEGRAM_GITHUB_TOKEN=your_github_token
+```
+
+**Test command processing:**
+```bash
+# Dry run (shows what would happen)
+./vga-events-bot --dry-run
+
+# Real processing
+./vga-events-bot
+```
+
+**Test notifications:**
+```bash
+# Send to specific user
+./vga-events --check-state all --format json | \
+  ./vga-events-telegram --chat-id YOUR_CHAT_ID
+
+# Test with dry-run
+./vga-events --check-state NV --format json | \
+  ./vga-events-telegram --chat-id YOUR_CHAT_ID --dry-run
+```
+
+**Test with Telegram:**
+1. Send `/subscribe NV` to your bot
+2. Wait for command processor to run (or run `./vga-events-bot` manually)
+3. Check that Gist updated with your subscription
+4. Run notification workflow to test personalized filtering
+
+### GitHub Gist Setup
+
+**Create Gist:**
+
+Using GitHub CLI (recommended):
+```bash
+echo '{}' | gh gist create --filename "vga-events-preferences.json" --desc "VGA Events Bot Preferences" -
+```
+
+Or using the helper script:
+```bash
+# Get GitHub token with 'gist' scope from https://github.com/settings/tokens
+./scripts/create-gist.sh ghp_yourTokenHere
+```
+
+Both methods create a private Gist containing:
+```json
+{}
+```
+
+As users subscribe, it will look like:
+```json
+{
+  "1745308556": {
+    "states": ["NV", "CA"],
+    "active": true
+  },
+  "9876543210": {
+    "states": ["TX"],
+    "active": true
+  }
+}
+```
+
+**Required GitHub Secrets:**
+- `TELEGRAM_BOT_TOKEN` - From @BotFather
+- `TELEGRAM_GIST_ID` - From create-gist.sh output
+- `TELEGRAM_GITHUB_TOKEN` - GitHub token with 'gist' scope
+
+### Bot Commands
+
+Users send these to the bot:
+- `/subscribe NV` - Subscribe to Nevada
+- `/unsubscribe CA` - Unsubscribe from California
+- `/list` - Show subscriptions
+- `/help` - Show help message
+
+### How Personalization Works
+
+1. User subscribes via `/subscribe NV`
+2. Command processor (runs every 15min) updates Gist
+3. Event checker (runs hourly) loads preferences from Gist
+4. For each user: filter events by their subscribed states
+5. Send only matching events to each user
+
+### Testing Workflows
+
+**Command processor:**
+```bash
+gh workflow run telegram-bot-commands.yml
+gh run list --workflow=telegram-bot-commands.yml
+```
+
+**Notifications:**
+```bash
+gh workflow run telegram-bot.yml
+gh run list --workflow=telegram-bot.yml
+```
+
+**View logs:**
+```bash
+gh run view <run-id> --log
+```
+
+### Debugging
+
+**Check Gist contents:**
+```bash
+curl -H "Authorization: token $TELEGRAM_GITHUB_TOKEN" \
+  https://api.github.com/gists/$TELEGRAM_GIST_ID | \
+  jq -r '.files["preferences.json"].content'
+```
+
+**Test preference filtering:**
+```bash
+# Simulate filtering for a user subscribed to NV, CA
+jq --arg states "NV,CA" '
+  .new_events as $events |
+  ($states | split(",")) as $subscribed |
+  {
+    new_events: ($events | map(select(.state as $s | $subscribed | index($s)))),
+    event_count: ($events | map(select(.state as $s | $subscribed | index($s))) | length)
+  }
+' events.json
+```
+
 ## Releases
 
 Releases are automated using GoReleaser and published to the Homebrew tap.

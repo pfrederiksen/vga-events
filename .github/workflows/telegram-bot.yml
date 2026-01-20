@@ -1,0 +1,147 @@
+name: Telegram Event Notifications
+
+on:
+  schedule:
+    # Run every hour at the top of the hour
+    - cron: '0 * * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: read
+
+jobs:
+  check-and-notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build tools
+        run: |
+          go build -o vga-events ./cmd/vga-events
+          go build -o vga-events-telegram ./cmd/vga-events-telegram
+
+      - name: Restore snapshots cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .snapshots
+          key: vga-events-snapshots-${{ github.run_id }}
+          restore-keys: |
+            vga-events-snapshots-
+
+      - name: Check for new events
+        id: check
+        run: |
+          # Create snapshots directory
+          mkdir -p .snapshots
+
+          # Run vga-events and capture exit code
+          set +e
+          ./vga-events --check-state all --format json --data-dir .snapshots > events.json
+          EXIT_CODE=$?
+          set -e
+
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -eq 2 ]; then
+            echo "new_events=true" >> $GITHUB_OUTPUT
+            echo "New events found!"
+          else
+            echo "new_events=false" >> $GITHUB_OUTPUT
+            echo "No new events found."
+          fi
+
+      - name: Load user preferences
+        if: steps.check.outputs.new_events == 'true'
+        id: prefs
+        env:
+          TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
+          TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
+        run: |
+          # Fetch preferences from Gist
+          PREFS_JSON=$(curl -s -H "Authorization: token $TELEGRAM_GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/gists/$TELEGRAM_GIST_ID" | \
+            jq -r '.files["preferences.json"].content')
+
+          echo "$PREFS_JSON" > preferences.json
+
+          # Get list of active users with subscriptions
+          USERS=$(echo "$PREFS_JSON" | jq -r 'to_entries[] | select(.value.active == true and (.value.states | length) > 0) | .key')
+          echo "users<<EOF" >> $GITHUB_OUTPUT
+          echo "$USERS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          USER_COUNT=$(echo "$USERS" | wc -l | tr -d ' ')
+          echo "Found $USER_COUNT user(s) with active subscriptions"
+
+      - name: Send personalized notifications
+        if: steps.check.outputs.new_events == 'true' && steps.prefs.outputs.users != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          # For each user, filter events by their subscribed states and send
+          while IFS= read -r CHAT_ID; do
+            [ -z "$CHAT_ID" ] && continue
+
+            echo "Processing notifications for user $CHAT_ID..."
+
+            # Get user's subscribed states
+            STATES=$(jq -r --arg chat "$CHAT_ID" '.[$chat].states | join(",")' preferences.json)
+
+            if [ -z "$STATES" ]; then
+              echo "  No states for user $CHAT_ID, skipping"
+              continue
+            fi
+
+            echo "  Subscribed states: $STATES"
+
+            # Filter events by user's states
+            jq --arg states "$STATES" '
+              .new_events as $events |
+              ($states | split(",")) as $subscribed |
+              {
+                checked_at: .checked_at,
+                new_events: ($events | map(select(.state as $s | $subscribed | index($s)))),
+                event_count: ($events | map(select(.state as $s | $subscribed | index($s))) | length)
+              }
+            ' events.json > "user_events_${CHAT_ID}.json"
+
+            EVENT_COUNT=$(jq -r '.event_count' "user_events_${CHAT_ID}.json")
+
+            if [ "$EVENT_COUNT" -gt 0 ]; then
+              echo "  Sending $EVENT_COUNT event(s) to user $CHAT_ID..."
+              ./vga-events-telegram --chat-id "$CHAT_ID" --events-file "user_events_${CHAT_ID}.json" --max-messages 10
+            else
+              echo "  No matching events for user $CHAT_ID"
+            fi
+
+          done <<< "${{ steps.prefs.outputs.users }}"
+
+      - name: Save snapshots cache
+        if: steps.check.outputs.exit_code != '1'
+        uses: actions/cache/save@v4
+        with:
+          path: .snapshots
+          key: vga-events-snapshots-${{ github.run_id }}
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.check.outputs.new_events }}" == "true" ]; then
+            echo "✅ Found new events and sent personalized notifications to subscribed users"
+          elif [ "${{ steps.check.outputs.exit_code }}" == "1" ]; then
+            echo "❌ Error checking for events"
+            exit 1
+          else
+            echo "ℹ️ No new events found"
+          fi

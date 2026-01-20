@@ -109,6 +109,93 @@ if vga-events --check-state all; then
 fi
 ```
 
+## Telegram Bot (Interactive + Personalized Notifications)
+
+Get personalized VGA event notifications via Telegram! The bot supports multiple users, each with their own state subscriptions.
+
+### Quick Start
+
+1. **Create your bot:**
+   - Message @BotFather on Telegram
+   - Send `/newbot` and follow instructions
+   - Save your bot token
+
+2. **Start chatting with your bot:**
+   - Click the link BotFather provides
+   - Send `/help` to see available commands
+   - Use `/subscribe NV` to subscribe to Nevada events
+   - Use `/list` to see your subscriptions
+
+### Bot Commands
+
+Send these commands to your bot in Telegram:
+
+- `/subscribe <STATE>` - Subscribe to a state's events (e.g., `/subscribe NV`)
+- `/unsubscribe <STATE>` - Unsubscribe from a state
+- `/list` - Show your current subscriptions
+- `/help` - Show help message with all commands
+
+**Multi-User Support:** Each person gets their own subscriptions! Subscribe to the states you care about, and you'll only receive events for those states.
+
+### GitHub Actions Setup (Automated Notifications)
+
+The bot runs on GitHub Actions - no server needed! It:
+- Checks for commands every 15 minutes
+- Checks for new events every hour
+- Sends personalized notifications to each user based on their subscriptions
+
+**Required Secrets:**
+
+1. **Create a GitHub Gist** to store user preferences:
+
+   **Option A: Using GitHub CLI (recommended)**
+   ```bash
+   echo '{}' | gh gist create --filename "vga-events-preferences.json" --desc "VGA Events Bot Preferences" -
+   ```
+
+   **Option B: Using the helper script**
+   ```bash
+   # Get a GitHub token with 'gist' scope from https://github.com/settings/tokens
+   ./scripts/create-gist.sh YOUR_GITHUB_TOKEN
+   ```
+
+   Both methods will output a Gist ID.
+
+2. **Add repository secrets** (Settings → Secrets and variables → Actions):
+   - `TELEGRAM_BOT_TOKEN` - Your bot token from @BotFather
+   - `TELEGRAM_GIST_ID` - The Gist ID from step 1
+   - `TELEGRAM_GITHUB_TOKEN` - GitHub token with 'gist' scope
+
+3. The workflows will start running automatically:
+   - Commands processed every 15 minutes
+   - Notifications sent hourly
+
+### Local Testing
+
+For development or testing locally:
+
+```bash
+# Set environment variables
+export TELEGRAM_BOT_TOKEN=your_bot_token
+export TELEGRAM_GIST_ID=your_gist_id
+export TELEGRAM_GITHUB_TOKEN=your_github_token
+
+# Process bot commands manually
+./vga-events-bot
+
+# Send notifications manually
+./vga-events --check-state all --format json | ./vga-events-telegram --chat-id YOUR_CHAT_ID
+```
+
+### How It Works
+
+1. **User subscribes** via `/subscribe NV` command
+2. **Bot processes command** (runs every 15 minutes via GitHub Actions)
+3. **Preferences stored** in private GitHub Gist
+4. **Event checking** runs hourly via GitHub Actions
+5. **Personalized notifications** sent only for subscribed states
+6. **Each user** receives only their relevant events
+
 ## How It Works
 
 1. Fetches the public state events page from vgagolf.org

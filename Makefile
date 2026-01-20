@@ -1,8 +1,10 @@
 .PHONY: build test lint clean install help
 
-# Build the binary
+# Build the binaries
 build:
 	go build -o vga-events ./cmd/vga-events
+	go build -o vga-events-telegram ./cmd/vga-events-telegram
+	go build -o vga-events-bot ./cmd/vga-events-bot
 
 # Run tests
 test:
@@ -18,7 +20,7 @@ lint:
 
 # Clean build artifacts
 clean:
-	rm -f vga-events coverage.out
+	rm -f vga-events vga-events-telegram vga-events-bot coverage.out
 	rm -rf bin/
 
 # Install the binary to $GOPATH/bin
