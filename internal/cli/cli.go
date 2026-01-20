@@ -55,7 +55,7 @@ Tracks events across runs and reports only new events since last check.`,
 // filterEventsByState filters events by state code
 func filterEventsByState(events []*event.Event, state string) []*event.Event {
 	// If checking all states, return all events
-	if state == "StateAll" {
+	if state == StateAll {
 		return events
 	}
 
@@ -77,14 +77,14 @@ func handleShowAll(currentEvents []*event.Event, state string, format OutputForm
 
 	for _, evt := range currentEvents {
 		// Apply state filter
-		if state != "StateAll" && !strings.EqualFold(evt.State, state) {
+		if state != StateAll && !strings.EqualFold(evt.State, state) {
 			continue
 		}
 
 		filteredEvents = append(filteredEvents, evt)
 
 		// Group by state for "all" mode
-		if state == "StateAll" {
+		if state == StateAll {
 			if stateMap[evt.State] == nil {
 				stateMap[evt.State] = make([]*event.Event, 0)
 			}
@@ -113,7 +113,7 @@ func handleShowAll(currentEvents []*event.Event, state string, format OutputForm
 	}
 
 	// Determine states
-	if state == "StateAll" {
+	if state == StateAll {
 		states := make([]string, 0, len(stateMap))
 		for s := range stateMap {
 			states = append(states, s)
@@ -221,7 +221,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine states checked
-	if state == "StateAll" {
+	if state == StateAll {
 		states := make([]string, 0, len(diff.States))
 		for s := range diff.States {
 			states = append(states, s)
