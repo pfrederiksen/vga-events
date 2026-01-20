@@ -147,11 +147,19 @@ The bot runs on GitHub Actions - no server needed! It:
 **Required Secrets:**
 
 1. **Create a GitHub Gist** to store user preferences:
+
+   **Option A: Using GitHub CLI (recommended)**
+   ```bash
+   echo '{}' | gh gist create --filename "vga-events-preferences.json" --desc "VGA Events Bot Preferences" -
+   ```
+
+   **Option B: Using the helper script**
    ```bash
    # Get a GitHub token with 'gist' scope from https://github.com/settings/tokens
    ./scripts/create-gist.sh YOUR_GITHUB_TOKEN
    ```
-   This will output a Gist ID.
+
+   Both methods will output a Gist ID.
 
 2. **Add repository secrets** (Settings → Secrets and variables → Actions):
    - `TELEGRAM_BOT_TOKEN` - Your bot token from @BotFather

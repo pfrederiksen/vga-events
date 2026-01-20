@@ -97,8 +97,11 @@ The project includes an interactive Telegram bot with personalized notifications
 # Build all tools
 make build
 
-# Create Gist for testing
-./scripts/create-gist.sh YOUR_GITHUB_TOKEN
+# Create Gist for testing (using gh CLI)
+echo '{}' | gh gist create --filename "vga-events-preferences.json" --desc "VGA Events Bot Preferences" -
+
+# Alternative: use the helper script
+# ./scripts/create-gist.sh YOUR_GITHUB_TOKEN
 
 # Set environment variables
 export TELEGRAM_BOT_TOKEN=your_bot_token
@@ -135,14 +138,19 @@ export TELEGRAM_GITHUB_TOKEN=your_github_token
 ### GitHub Gist Setup
 
 **Create Gist:**
-```bash
-# Get GitHub token with 'gist' scope
-# https://github.com/settings/tokens
 
+Using GitHub CLI (recommended):
+```bash
+echo '{}' | gh gist create --filename "vga-events-preferences.json" --desc "VGA Events Bot Preferences" -
+```
+
+Or using the helper script:
+```bash
+# Get GitHub token with 'gist' scope from https://github.com/settings/tokens
 ./scripts/create-gist.sh ghp_yourTokenHere
 ```
 
-This creates a private Gist containing:
+Both methods create a private Gist containing:
 ```json
 {}
 ```
