@@ -99,7 +99,6 @@ func (s *Scraper) parseEvents(r io.Reader, sourceURL string) ([]*event.Event, er
 		if monthPattern.MatchString(line) {
 			recentMonth = line
 			recentDay = ""
-			recentYear = ""
 			continue
 		}
 
