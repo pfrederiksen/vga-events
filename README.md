@@ -148,19 +148,18 @@ Automatically post new VGA events to Twitter using the companion `vga-events-twi
 ### Automated Posting (GitHub Actions)
 
 This repository includes a GitHub Actions workflow that:
-- Runs daily at 8 AM UTC
-- Checks for new events
-- Posts to Twitter automatically
+- Runs every hour (at the top of the hour)
+- Checks all states for new events
+- Posts to Twitter automatically (max 10 tweets per run)
 - Can be manually triggered
 
 To enable:
-1. Fork the repository
-2. Add Twitter credentials as repository secrets:
+1. Add Twitter credentials as repository secrets:
    - `TWITTER_API_KEY`
    - `TWITTER_API_SECRET`
    - `TWITTER_ACCESS_TOKEN`
    - `TWITTER_ACCESS_SECRET`
-3. Enable GitHub Actions in your fork
+2. The workflow will automatically run every hour
 
 The workflow is defined in `.github/workflows/twitter-bot.yml`
 

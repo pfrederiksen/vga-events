@@ -85,11 +85,14 @@ export TWITTER_API_SECRET=xxx
 export TWITTER_ACCESS_TOKEN=xxx
 export TWITTER_ACCESS_SECRET=xxx
 
-# Test with dry-run (no actual posting)
-./vga-events --check-state NV --format json | ./vga-events-twitter --dry-run
+# Test with dry-run (no actual posting) - checks ALL states
+./vga-events --check-state all --format json | ./vga-events-twitter --dry-run
 
-# Post to Twitter
+# Post to Twitter - checks ALL states
 ./vga-events --check-state all --format json | ./vga-events-twitter
+
+# Or test with a single state first
+./vga-events --check-state NV --format json | ./vga-events-twitter --dry-run
 ```
 
 ### GitHub Actions Setup
