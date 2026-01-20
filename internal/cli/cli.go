@@ -24,6 +24,7 @@ var (
 	flagFormat     string
 	flagRefresh    bool
 	flagVerbose    bool
+	flagShowAll    bool
 )
 
 // NewRootCmd creates the root command
@@ -42,10 +43,77 @@ Tracks events across runs and reports only new events since last check.`,
 	cmd.Flags().StringVar(&flagFormat, "format", "text", "Output format: text or json")
 	cmd.Flags().BoolVar(&flagRefresh, "refresh", false, "Refresh snapshot without showing new events")
 	cmd.Flags().BoolVar(&flagVerbose, "verbose", false, "Enable verbose logging")
+	cmd.Flags().BoolVar(&flagShowAll, "show-all", false, "Show all events, not just new ones")
 
 	cmd.MarkFlagRequired("check-state")
 
 	return cmd
+}
+
+// handleShowAll handles the --show-all flag to display all events
+func handleShowAll(currentEvents []*event.Event, state string, format OutputFormat, verbose bool, store *storage.Storage) error {
+	// Filter events by state
+	filteredEvents := make([]*event.Event, 0)
+	stateMap := make(map[string][]*event.Event)
+
+	for _, evt := range currentEvents {
+		// Apply state filter
+		if state != "ALL" && !strings.EqualFold(evt.State, state) {
+			continue
+		}
+
+		filteredEvents = append(filteredEvents, evt)
+
+		// Group by state for "all" mode
+		if state == "ALL" {
+			if stateMap[evt.State] == nil {
+				stateMap[evt.State] = make([]*event.Event, 0)
+			}
+			stateMap[evt.State] = append(stateMap[evt.State], evt)
+		}
+	}
+
+	// Save snapshot
+	if err := store.CreateSnapshotFromEvents(currentEvents, state); err != nil {
+		return fmt.Errorf("saving snapshot: %w", err)
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Saved snapshot\n")
+	}
+
+	// Prepare output
+	result := &OutputResult{
+		CheckedAt:  time.Now().UTC(),
+		NewEvents:  filteredEvents,
+		EventCount: len(filteredEvents),
+		ShowAll:    true,
+	}
+
+	// Determine states
+	if state == "ALL" {
+		states := make([]string, 0, len(stateMap))
+		for s := range stateMap {
+			states = append(states, s)
+		}
+		result.States = states
+		result.ByState = stateMap
+	} else {
+		result.States = []string{state}
+		if len(filteredEvents) > 0 {
+			result.ByState = map[string][]*event.Event{
+				state: filteredEvents,
+			}
+		}
+	}
+
+	// Write output
+	if err := WriteOutput(os.Stdout, result, format, verbose); err != nil {
+		return fmt.Errorf("writing output: %w", err)
+	}
+
+	os.Exit(ExitSuccess)
+	return nil
 }
 
 // runCheck is the main command logic
@@ -88,6 +156,11 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	if flagVerbose {
 		fmt.Fprintf(os.Stderr, "Fetched %d total events\n", len(currentEvents))
+	}
+
+	// Handle --show-all mode
+	if flagShowAll {
+		return handleShowAll(currentEvents, state, format, flagVerbose, store)
 	}
 
 	// Load previous snapshot

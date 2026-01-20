@@ -20,11 +20,12 @@ const (
 
 // OutputResult contains data to be output
 type OutputResult struct {
-	CheckedAt  time.Time              `json:"checked_at"`
-	States     []string               `json:"states"`
-	NewEvents  []*event.Event         `json:"new_events"`
-	EventCount int                    `json:"event_count"`
+	CheckedAt  time.Time                 `json:"checked_at"`
+	States     []string                  `json:"states"`
+	NewEvents  []*event.Event            `json:"new_events"`
+	EventCount int                       `json:"event_count"`
 	ByState    map[string][]*event.Event `json:"by_state,omitempty"`
+	ShowAll    bool                      `json:"show_all,omitempty"`
 }
 
 // WriteOutput writes the result in the specified format
@@ -48,8 +49,20 @@ func writeJSON(w io.Writer, result *OutputResult) error {
 
 // writeText outputs results as human-readable text
 func writeText(w io.Writer, result *OutputResult, verbose bool) error {
+	// Determine labels based on ShowAll mode
+	eventLabel := "new"
+	eventPrefix := "NEW"
+	if result.ShowAll {
+		eventLabel = "events"
+		eventPrefix = ""
+	}
+
 	if result.EventCount == 0 {
-		fmt.Fprintln(w, "No new events found.")
+		if result.ShowAll {
+			fmt.Fprintln(w, "No events found.")
+		} else {
+			fmt.Fprintln(w, "No new events found.")
+		}
 		return nil
 	}
 
@@ -68,9 +81,13 @@ func writeText(w io.Writer, result *OutputResult, verbose bool) error {
 				continue
 			}
 
-			fmt.Fprintf(w, "\n%s (%d new):\n", state, len(events))
+			fmt.Fprintf(w, "\n%s (%d %s):\n", state, len(events), eventLabel)
 			for _, evt := range events {
-				fmt.Fprintf(w, "  NEW: %s\n", evt.Raw)
+				if eventPrefix != "" {
+					fmt.Fprintf(w, "  %s: %s\n", eventPrefix, evt.Raw)
+				} else {
+					fmt.Fprintf(w, "  %s\n", evt.Raw)
+				}
 				if verbose {
 					fmt.Fprintf(w, "       ID: %s\n", evt.ID)
 					if evt.DateText != "" {
@@ -82,11 +99,15 @@ func writeText(w io.Writer, result *OutputResult, verbose bool) error {
 				}
 			}
 		}
-		fmt.Fprintf(w, "\nTotal: %d new events across %d states\n", result.EventCount, len(result.ByState))
+		fmt.Fprintf(w, "\nTotal: %d %s across %d states\n", result.EventCount, eventLabel, len(result.ByState))
 	} else {
 		// Simple list for single-state queries
 		for _, evt := range result.NewEvents {
-			fmt.Fprintf(w, "NEW (%s): %s\n", evt.State, evt.Raw)
+			if eventPrefix != "" {
+				fmt.Fprintf(w, "%s (%s): %s\n", eventPrefix, evt.State, evt.Raw)
+			} else {
+				fmt.Fprintf(w, "%s: %s\n", evt.State, evt.Raw)
+			}
 			if verbose {
 				fmt.Fprintf(w, "     ID: %s\n", evt.ID)
 				if evt.DateText != "" {
@@ -97,7 +118,7 @@ func writeText(w io.Writer, result *OutputResult, verbose bool) error {
 				}
 			}
 		}
-		fmt.Fprintf(w, "\nTotal: %d new events\n", result.EventCount)
+		fmt.Fprintf(w, "\nTotal: %d %s\n", result.EventCount, eventLabel)
 	}
 
 	return nil
