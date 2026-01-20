@@ -12,11 +12,10 @@ import (
 )
 
 var (
-	eventsFile = flag.String("events-file", "", "Path to events JSON file (or read from stdin)")
-	dryRun     = flag.Bool("dry-run", false, "Print tweets without posting")
-	maxTweets  = flag.Int("max-tweets", 10, "Maximum number of tweets to post")
+	eventsFile  = flag.String("events-file", "", "Path to events JSON file (or read from stdin)")
+	dryRun      = flag.Bool("dry-run", false, "Print tweets without posting")
+	maxTweets   = flag.Int("max-tweets", 10, "Maximum number of tweets to post")
 	stateFilter = flag.String("state", "", "Only tweet events for this state")
-	version    = "dev"
 )
 
 func main() {
@@ -30,7 +29,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error opening events file: %v\n", err)
 			os.Exit(1)
 		}
-		defer f.Close()
+		defer func() {
+			if err := f.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error closing file: %v\n", err)
+			}
+		}()
 		reader = f
 	} else {
 		reader = os.Stdin

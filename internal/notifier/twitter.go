@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/dghubble/go-twitter/twitter"
+	"github.com/dghubble/go-twitter/twitter" //nolint:staticcheck // Using stable v1.1 API
 	"github.com/dghubble/oauth1"
 	"github.com/pfrederiksen/vga-events/internal/event"
 )
@@ -60,7 +60,7 @@ func (n *TwitterNotifier) Notify(events []*event.Event) error {
 
 // formatTweet formats an event as a tweet
 func formatTweet(evt *event.Event) string {
-	tweet := fmt.Sprintf("🏌️ New VGA Golf Event!\n\n")
+	tweet := "🏌️ New VGA Golf Event!\n\n"
 	tweet += fmt.Sprintf("📍 %s - %s\n", evt.State, evt.Title)
 
 	if evt.DateText != "" {
