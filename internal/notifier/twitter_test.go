@@ -32,6 +32,8 @@ func TestFormatTweet(t *testing.T) {
 				"Chimera Golf Club",
 				"Apr 04 2026",
 				"Las Vegas",
+				"Register at vgagolf.org/state-events",
+				"login required",
 				"#VGAGolf",
 				"#Golf",
 				"🏌️",

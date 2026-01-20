@@ -71,6 +71,8 @@ func formatTweet(evt *event.Event) string {
 		tweet += fmt.Sprintf("🏢 %s\n", evt.City)
 	}
 
+	// Add registration link (login required for specific event)
+	tweet += "\n🔗 Register at vgagolf.org/state-events (login required)\n"
 	tweet += "\n#VGAGolf #Golf"
 
 	// Twitter limit is 280 characters
