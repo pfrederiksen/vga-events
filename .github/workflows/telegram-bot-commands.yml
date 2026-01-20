@@ -1,0 +1,42 @@
+name: Process Telegram Bot Commands
+
+on:
+  schedule:
+    # Run every 15 minutes
+    - cron: '*/15 * * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: read
+
+jobs:
+  process-commands:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build command processor
+        run: go build -o vga-events-bot ./cmd/vga-events-bot
+
+      - name: Process commands
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
+          TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
+        run: |
+          ./vga-events-bot
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "✅ Command processing complete"

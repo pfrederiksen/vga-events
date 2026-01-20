@@ -17,6 +17,7 @@ go.work
 # Binary output
 /vga-events
 /vga-events-telegram
+/vga-events-bot
 /bin/
 
 # IDE

@@ -79,3 +79,4 @@ jobs:
       run: |
         go build -v ./cmd/vga-events
         go build -v ./cmd/vga-events-telegram
+        go build -v ./cmd/vga-events-bot
