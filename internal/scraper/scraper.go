@@ -71,50 +71,131 @@ func (s *Scraper) parseEvents(r io.Reader, sourceURL string) ([]*event.Event, er
 	// Alternative pattern for events without city
 	stateEventPatternNoCity := regexp.MustCompile(`^([A-Z]{2})\s*-\s*(.+)$`)
 
-	// Try multiple parsing strategies for robustness
+	// Pattern to match bracketed dates: "[Feb 13 2026]" or "[Feb 13 2026]"
+	bracketedDatePattern := regexp.MustCompile(`^\[(.*?)\]$`)
 
-	// Strategy 1: Look for text content that matches state event patterns
-	doc.Find("*").Each(func(i int, sel *goquery.Selection) {
-		text := strings.TrimSpace(sel.Text())
-		lines := strings.Split(text, "\n")
+	// Pattern to match date + event on same line: "[Mar 13 2026] UT - Sunbrook Golf Club - St. George"
+	dateEventPattern := regexp.MustCompile(`^\[(.*?)\]\s+([A-Z]{2})\s*-\s*(.+?)\s*-\s*(.+)$`)
+	dateEventPatternNoCity := regexp.MustCompile(`^\[(.*?)\]\s+([A-Z]{2})\s*-\s*(.+)$`)
 
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
+	// Get all text content and process line by line to preserve order of dates and events
+	allText := doc.Text()
+	lines := strings.Split(allText, "\n")
 
-			// Try pattern with city
-			if matches := stateEventPattern.FindStringSubmatch(line); matches != nil {
-				state := matches[1]
-				title := strings.TrimSpace(matches[2])
-				city := strings.TrimSpace(matches[3])
+	var currentDate string // Track the most recent date
+	monthPattern := regexp.MustCompile(`^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$`)
+	dayPattern := regexp.MustCompile(`^\d{1,2}$`)
+	yearPattern := regexp.MustCompile(`^20\d{2}$`)
 
-				// Extract date from title if present
-				dateText := extractDate(title)
+	var recentMonth, recentDay, recentYear string
 
-				evt := event.NewEvent(state, title, dateText, city, line, sourceURL)
-				events = append(events, evt)
-				continue
-			}
-
-			// Try pattern without city
-			if matches := stateEventPatternNoCity.FindStringSubmatch(line); matches != nil {
-				state := matches[1]
-				title := strings.TrimSpace(matches[2])
-
-				// Skip if this looks like it might be part of a different pattern
-				if strings.Contains(title, "http") || len(title) < 5 {
-					continue
-				}
-
-				dateText := extractDate(title)
-
-				evt := event.NewEvent(state, title, dateText, "", line, sourceURL)
-				events = append(events, evt)
-			}
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
-	})
+
+		// Check if this line is a month name
+		if monthPattern.MatchString(line) {
+			recentMonth = line
+			recentDay = ""
+			recentYear = ""
+			continue
+		}
+
+		// Check if this line is a day number (after seeing a month)
+		if recentMonth != "" && dayPattern.MatchString(line) {
+			recentDay = line
+			continue
+		}
+
+		// Check if this line is a year (after seeing month and day)
+		if recentMonth != "" && recentDay != "" && yearPattern.MatchString(line) {
+			recentYear = line
+			// Assemble the current date
+			currentDate = fmt.Sprintf("%s %s %s", recentMonth, recentDay, recentYear)
+			continue
+		}
+
+		// Check for date + event on same line (with city)
+		if matches := dateEventPattern.FindStringSubmatch(line); matches != nil {
+			dateText := strings.TrimSpace(matches[1])
+			state := matches[2]
+			title := strings.TrimSpace(matches[3])
+			city := strings.TrimSpace(matches[4])
+
+			// Extract raw event line without the date prefix
+			rawLine := strings.TrimSpace(strings.TrimPrefix(line, "["+matches[1]+"]"))
+
+			evt := event.NewEvent(state, title, dateText, city, rawLine, sourceURL)
+			events = append(events, evt)
+			continue
+		}
+
+		// Check for date + event on same line (without city)
+		if matches := dateEventPatternNoCity.FindStringSubmatch(line); matches != nil {
+			dateText := strings.TrimSpace(matches[1])
+			state := matches[2]
+			title := strings.TrimSpace(matches[3])
+
+			// Skip if this looks like it might be part of a different pattern
+			if strings.Contains(title, "http") || len(title) < 5 {
+				continue
+			}
+
+			// Extract raw event line without the date prefix
+			rawLine := strings.TrimSpace(strings.TrimPrefix(line, "["+matches[1]+"]"))
+
+			evt := event.NewEvent(state, title, dateText, "", rawLine, sourceURL)
+			events = append(events, evt)
+			continue
+		}
+
+		// Check if this line is a standalone bracketed date
+		if matches := bracketedDatePattern.FindStringSubmatch(line); matches != nil {
+			currentDate = strings.TrimSpace(matches[1])
+			continue
+		}
+
+		// Try pattern with city
+		if matches := stateEventPattern.FindStringSubmatch(line); matches != nil {
+			state := matches[1]
+			title := strings.TrimSpace(matches[2])
+			city := strings.TrimSpace(matches[3])
+
+			// Use bracketed date if available, otherwise extract from title
+			dateText := currentDate
+			if dateText == "" {
+				dateText = extractDate(title)
+			}
+
+			evt := event.NewEvent(state, title, dateText, city, line, sourceURL)
+			events = append(events, evt)
+			currentDate = "" // Reset after use
+			continue
+		}
+
+		// Try pattern without city
+		if matches := stateEventPatternNoCity.FindStringSubmatch(line); matches != nil {
+			state := matches[1]
+			title := strings.TrimSpace(matches[2])
+
+			// Skip if this looks like it might be part of a different pattern
+			if strings.Contains(title, "http") || len(title) < 5 {
+				continue
+			}
+
+			// Use bracketed date if available, otherwise extract from title
+			dateText := currentDate
+			if dateText == "" {
+				dateText = extractDate(title)
+			}
+
+			evt := event.NewEvent(state, title, dateText, "", line, sourceURL)
+			events = append(events, evt)
+			currentDate = "" // Reset after use
+		}
+	}
 
 	// Deduplicate events by ID
 	seen := make(map[string]bool)
