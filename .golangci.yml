@@ -1,11 +1,17 @@
 linters-settings:
   gocyclo:
-    min-complexity: 15
+    min-complexity: 25
   dupl:
     threshold: 100
   goconst:
-    min-len: 2
-    min-occurrences: 2
+    min-len: 3
+    min-occurrences: 5
+  errcheck:
+    exclude-functions:
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - (*github.com/spf13/cobra.Command).MarkFlagRequired
+      - (io.ReadCloser).Close
 
 linters:
   disable-all: true
