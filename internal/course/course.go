@@ -15,31 +15,31 @@ type CourseInfo struct {
 	Slope   int     // Course slope rating (0 if unknown)
 	Rating  float64 // Course rating (0 if unknown)
 	Website string  // Course website URL
-	Source  string  // Data source: "manual" or "ghin"
+	Source  string  // Data source: "manual", "usga", or "cache"
 }
 
 // globalCache is the shared course cache instance
 var globalCache *CourseCache
 
-// globalGHINClient is the shared GHIN API client
-var globalGHINClient *GHINClient
+// globalUSGAClient is the shared USGA API client
+var globalUSGAClient *USGAClient
 
-// init initializes global cache and GHIN client
+// init initializes global cache and USGA client
 func init() {
 	globalCache = NewCourseCache()
-	globalGHINClient = NewGHINClient()
+	globalUSGAClient = NewUSGAClient()
 }
 
 // LookupCourse attempts to find course information by title and state
-// Uses three-tier lookup: manual DB → cache → GHIN API
+// Uses three-tier lookup: manual DB → cache → USGA API
 // Returns nil if no information is available
 func LookupCourse(title, state string) *CourseInfo {
-	return LookupCourseWithCache(title, state, globalCache, globalGHINClient)
+	return LookupCourseWithCache(title, state, globalCache, globalUSGAClient)
 }
 
 // LookupCourseWithCache performs course lookup with explicit cache and client
 // Useful for testing and custom configurations
-func LookupCourseWithCache(title, state string, cache *CourseCache, ghinClient *GHINClient) *CourseInfo {
+func LookupCourseWithCache(title, state string, cache *CourseCache, usgaClient *USGAClient) *CourseInfo {
 	// 1. Try manual database first (instant, no API call)
 	if info := lookupManual(title, state); info != nil {
 		return info
@@ -52,12 +52,12 @@ func LookupCourseWithCache(title, state string, cache *CourseCache, ghinClient *
 		}
 	}
 
-	// 3. Try GHIN API (slow, requires network)
-	if ghinClient != nil {
-		info, err := ghinClient.SearchCourse(title, state)
+	// 3. Try USGA API (slow, requires network)
+	if usgaClient != nil {
+		info, err := usgaClient.SearchCourse(title, state)
 		if err != nil {
 			// Log error but don't fail - graceful degradation
-			// In production, could log: fmt.Fprintf(os.Stderr, "GHIN API error: %v\n", err)
+			// In production, could log: fmt.Fprintf(os.Stderr, "USGA API error: %v\n", err)
 		} else if info != nil {
 			// Cache successful lookup
 			if cache != nil {
