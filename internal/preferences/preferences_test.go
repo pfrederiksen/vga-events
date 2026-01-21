@@ -68,6 +68,7 @@ func TestPreferences(t *testing.T) {
 	}
 }
 
+//nolint:dupl // Similar structure to TestIsValidEventStatus is intentional
 func TestIsValidState(t *testing.T) {
 	tests := []struct {
 		state string
@@ -391,5 +392,224 @@ func TestSetDigestFrequency(t *testing.T) {
 	}
 	if user.DigestFrequency != "daily" {
 		t.Errorf("Should normalize to lowercase, got %q", user.DigestFrequency)
+	}
+}
+
+func TestEventStatus(t *testing.T) {
+	prefs := NewPreferences()
+	user := prefs.GetUser("test-user")
+
+	// Test setting valid statuses
+	tests := []struct {
+		eventID string
+		status  string
+		valid   bool
+	}{
+		{"event1", "interested", true},
+		{"event2", "registered", true},
+		{"event3", "maybe", true},
+		{"event4", "skip", true},
+		{"event5", "invalid", false},
+		{"event6", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			got := user.SetEventStatus(tt.eventID, tt.status)
+			if got != tt.valid {
+				t.Errorf("SetEventStatus(%q, %q) = %v, want %v", tt.eventID, tt.status, got, tt.valid)
+			}
+
+			if tt.valid {
+				// Verify status was set
+				status := user.GetEventStatus(tt.eventID)
+				if status != tt.status {
+					t.Errorf("GetEventStatus(%q) = %q, want %q", tt.eventID, status, tt.status)
+				}
+			}
+		})
+	}
+
+	// Test case insensitivity
+	if !user.SetEventStatus("event7", "INTERESTED") {
+		t.Error("Should accept uppercase 'INTERESTED'")
+	}
+	if user.GetEventStatus("event7") != "interested" {
+		t.Error("Should normalize to lowercase")
+	}
+
+	// Test GetEventStatus for non-existent event
+	if status := user.GetEventStatus("nonexistent"); status != "" {
+		t.Errorf("GetEventStatus for nonexistent event should return empty string, got %q", status)
+	}
+
+	// Test RemoveEventStatus
+	user.SetEventStatus("event-to-remove", "interested")
+	user.RemoveEventStatus("event-to-remove")
+	if status := user.GetEventStatus("event-to-remove"); status != "" {
+		t.Errorf("Event status should be removed, got %q", status)
+	}
+}
+
+func TestGetEventsByStatus(t *testing.T) {
+	prefs := NewPreferences()
+	user := prefs.GetUser("test-user")
+
+	// Set up events with different statuses
+	user.SetEventStatus("event1", "interested")
+	user.SetEventStatus("event2", "interested")
+	user.SetEventStatus("event3", "registered")
+	user.SetEventStatus("event4", "maybe")
+	user.SetEventStatus("event5", "skip")
+
+	// Test getting events by status
+	interested := user.GetEventsByStatus("interested")
+	if len(interested) != 2 {
+		t.Errorf("Expected 2 interested events, got %d", len(interested))
+	}
+
+	registered := user.GetEventsByStatus("registered")
+	if len(registered) != 1 {
+		t.Errorf("Expected 1 registered event, got %d", len(registered))
+	}
+
+	maybe := user.GetEventsByStatus("maybe")
+	if len(maybe) != 1 {
+		t.Errorf("Expected 1 maybe event, got %d", len(maybe))
+	}
+
+	skip := user.GetEventsByStatus("skip")
+	if len(skip) != 1 {
+		t.Errorf("Expected 1 skip event, got %d", len(skip))
+	}
+
+	// Test with status that has no events
+	none := user.GetEventsByStatus("nonexistent")
+	if len(none) != 0 {
+		t.Errorf("Expected 0 events for nonexistent status, got %d", len(none))
+	}
+}
+
+//nolint:dupl // Similar structure to TestIsValidState is intentional
+func TestIsValidEventStatus(t *testing.T) {
+	tests := []struct {
+		status string
+		valid  bool
+	}{
+		{"interested", true},
+		{"registered", true},
+		{"maybe", true},
+		{"skip", true},
+		{"INTERESTED", true},     // case insensitive
+		{"  registered  ", true}, // whitespace
+		{"invalid", false},
+		{"", false},
+		{"pending", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			got := IsValidEventStatus(tt.status)
+			if got != tt.valid {
+				t.Errorf("IsValidEventStatus(%q) = %v, want %v", tt.status, got, tt.valid)
+			}
+		})
+	}
+}
+
+func TestReminderDays(t *testing.T) {
+	prefs := NewPreferences()
+	user := prefs.GetUser("test-user")
+
+	// Test setting valid reminder days
+	if !user.SetReminderDays([]int{1, 3, 7}) {
+		t.Error("Should accept valid reminder days")
+	}
+
+	if len(user.ReminderDays) != 3 {
+		t.Errorf("Expected 3 reminder days, got %d", len(user.ReminderDays))
+	}
+
+	// Test HasReminderDay
+	if !user.HasReminderDay(1) {
+		t.Error("Should have reminder day 1")
+	}
+	if !user.HasReminderDay(3) {
+		t.Error("Should have reminder day 3")
+	}
+	if !user.HasReminderDay(7) {
+		t.Error("Should have reminder day 7")
+	}
+	if user.HasReminderDay(14) {
+		t.Error("Should not have reminder day 14")
+	}
+
+	// Test setting invalid reminder days
+	if user.SetReminderDays([]int{1, 5, 7}) {
+		t.Error("Should reject invalid reminder day 5")
+	}
+
+	// Test setting all valid days
+	if !user.SetReminderDays([]int{1, 3, 7, 14}) {
+		t.Error("Should accept all valid reminder days")
+	}
+
+	if len(user.ReminderDays) != 4 {
+		t.Errorf("Expected 4 reminder days, got %d", len(user.ReminderDays))
+	}
+
+	// Test empty reminder days
+	if !user.SetReminderDays([]int{}) {
+		t.Error("Should accept empty reminder days")
+	}
+
+	if len(user.ReminderDays) != 0 {
+		t.Errorf("Expected 0 reminder days, got %d", len(user.ReminderDays))
+	}
+}
+
+func TestEventStatusMigration(t *testing.T) {
+	// Simulate an existing user without EventStatuses field
+	prefs := make(Preferences)
+	prefs["legacy-user"] = &UserPreferences{
+		States:        []string{"NV"},
+		Active:        true,
+		EventStatuses: nil, // Old user doesn't have this
+	}
+
+	// GetUser should initialize missing fields
+	user := prefs.GetUser("legacy-user")
+
+	if user.EventStatuses == nil {
+		t.Error("Migrated user should have initialized EventStatuses")
+	}
+
+	// Test that we can set statuses
+	if !user.SetEventStatus("test-event", "interested") {
+		t.Error("Should be able to set event status after migration")
+	}
+}
+
+func TestReminderDaysMigration(t *testing.T) {
+	// Simulate an existing user without ReminderDays field
+	prefs := make(Preferences)
+	prefs["legacy-user"] = &UserPreferences{
+		States:       []string{"NV"},
+		Active:       true,
+		ReminderDays: nil, // Old user doesn't have this
+	}
+
+	// GetUser should work (migration happens in GetUser for existing users)
+	user := prefs.GetUser("legacy-user")
+
+	// New users should have empty ReminderDays slice
+	if user.ReminderDays == nil {
+		// This is OK - it will be initialized when SetReminderDays is called
+		user.ReminderDays = []int{}
+	}
+
+	// Test that we can set reminder days
+	if !user.SetReminderDays([]int{1, 7}) {
+		t.Error("Should be able to set reminder days")
 	}
 }

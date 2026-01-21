@@ -130,12 +130,36 @@ Get personalized VGA event notifications via Telegram! The bot supports multiple
 
 Send these commands to your bot in Telegram:
 
-- `/subscribe <STATE>` - Subscribe to a state's events (e.g., `/subscribe NV`)
-- `/unsubscribe <STATE>` - Unsubscribe from a state
-- `/list` - Show your current subscriptions
+**Essential Commands:**
+- `/menu` - Quick actions menu with buttons
 - `/help` - Show help message with all commands
+- `/subscribe <STATE>` - Subscribe to a state's events (e.g., `/subscribe NV`)
+- `/manage` - Manage your subscriptions with buttons
+- `/list` - Show your current subscriptions
 
-**Multi-User Support:** Each person gets their own subscriptions! Subscribe to the states you care about, and you'll only receive events for those states.
+**Event Discovery:**
+- `/search <keyword>` - Search for events (e.g., `/search "Pine Valley"`)
+- `/my-events` - View events you've marked as interested/registered
+- `/export-calendar` - Download all events as .ics calendar file
+
+**Event Tracking:**
+When you receive event notifications, use the status buttons to track them:
+- ⭐ **Interested** - Events you want to attend
+- ✅ **Registered** - Events you've signed up for
+- 🤔 **Maybe** - Events you're considering
+- ❌ **Skip** - Events you're not interested in
+
+**Reminders:**
+- `/reminders` - Configure event reminders (1 day, 3 days, 1 week, or 2 weeks before)
+- Get reminded about events you've marked as ⭐ Interested or ✅ Registered
+
+**Notification Settings:**
+- `/settings` - Configure notification mode:
+  - Immediate (default) - Get notified right away
+  - Daily digest - Receive a daily summary at 9 AM UTC
+  - Weekly digest - Receive a weekly summary on Mondays
+
+**Multi-User Support:** Each person gets their own subscriptions, event tracking, and reminder preferences!
 
 ### GitHub Actions Setup (Automated Notifications)
 
