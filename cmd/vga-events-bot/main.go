@@ -553,9 +553,9 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 		case "main":
 			responseText, keyboard = showMenuKeyboard()
 		case "all-events":
-			responseText, _ = handleAllEvents(prefs, chatID, botToken, dryRun)
+			responseText, _ = handleAllEvents(prefs, chatID, botToken, dryRun, modified)
 		case "my-events":
-			responseText, _ = handleMyEvents(prefs, chatID, botToken, dryRun)
+			responseText, _ = handleMyEvents(prefs, chatID, botToken, dryRun, modified)
 		case "upcoming":
 			responseText = handleUpcomingEventsCallback(prefs, chatID, botToken, dryRun)
 		case "reminders":
@@ -590,6 +590,9 @@ Example:
 		user := prefs.GetUser(chatID)
 		if user.SetEventStatus(eventID, status) {
 			*modified = true
+
+			// Track stats: event marked with status
+			user.IncrementEventStatus(status)
 
 			// Get status emoji and text
 			statusEmoji := ""
@@ -833,7 +836,7 @@ Please provide a search keyword.
 		}
 		keyword := strings.Join(parts[1:], " ")
 		keyword = strings.Trim(keyword, `"'`) // Remove quotes if present
-		return handleSearch(prefs, chatID, keyword, botToken, dryRun)
+		return handleSearch(prefs, chatID, keyword, botToken, dryRun, modified)
 
 	case "/export-calendar":
 		// Optional parameter: state code
@@ -844,10 +847,10 @@ Please provide a search keyword.
 		return handleExportCalendar(prefs, chatID, stateFilter, botToken, dryRun)
 
 	case "/my-events":
-		return handleMyEvents(prefs, chatID, botToken, dryRun)
+		return handleMyEvents(prefs, chatID, botToken, dryRun, modified)
 
 	case "/events":
-		return handleAllEvents(prefs, chatID, botToken, dryRun)
+		return handleAllEvents(prefs, chatID, botToken, dryRun, modified)
 
 	case "/note":
 		if len(parts) < 2 {
@@ -879,13 +882,21 @@ Please provide a search keyword.
 		// Join remaining parts as city name (supports multi-word cities)
 		cityName := strings.Join(parts[1:], " ")
 		cityName = strings.Trim(cityName, `"'`) // Remove quotes if present
-		return handleNear(prefs, chatID, cityName, botToken, dryRun)
+		return handleNear(prefs, chatID, cityName, botToken, dryRun, modified)
 
 	case "/reminders":
 		return handleRemindersWithKeyboard(prefs, chatID, botToken, dryRun)
 
 	case "/bulk":
 		return handleBulkWithKeyboard(prefs, chatID, botToken, dryRun)
+
+	case "/stats":
+		// Optional parameter: week, month, all
+		period := "week"
+		if len(parts) >= 2 {
+			period = strings.ToLower(parts[1])
+		}
+		return handleStats(prefs, chatID, period), nil
 
 	case "/check":
 		return handleCheck(chatID), nil
@@ -910,6 +921,7 @@ I help you track VGA Golf events in your favorite states!
 /note - Add a note to an event 📝
 /notes - List all events with notes 📋
 /reminders - Configure event reminders 🔔
+/stats - View your engagement statistics 📊
 /bulk - Bulk actions for multiple events 🔧
 /export-calendar - Download all events as .ics file 📅
 /subscribe - Choose states with buttons (or /subscribe NV)
@@ -1081,8 +1093,85 @@ func handleRemoveNote(prefs preferences.Preferences, chatID, eventID string, mod
 	return fmt.Sprintf("✅ Note removed for event <code>%s</code>", eventID), nil
 }
 
+// handleStats displays user engagement statistics
+func handleStats(prefs preferences.Preferences, chatID, period string) string {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return "❌ Error: User not found"
+	}
+
+	if !user.EnableStats {
+		return "📊 Statistics tracking is disabled.\n\nStats help you track your VGA Golf engagement!"
+	}
+
+	var stats *preferences.WeeklyStats
+	var periodName string
+
+	switch period {
+	case "week", "":
+		stats = user.WeeklyStats
+		periodName = "This Week"
+	case "all":
+		stats = user.GetAllTimeStats()
+		periodName = "All Time"
+	default:
+		return "❌ Invalid period. Use: /stats, /stats week, or /stats all"
+	}
+
+	if stats == nil {
+		return "📊 No statistics available yet.\n\nStart viewing events to track your activity!"
+	}
+
+	var msg strings.Builder
+	msg.WriteString(fmt.Sprintf("📊 <b>Your VGA Golf Stats (%s)</b>\n\n", periodName))
+
+	// Events viewed
+	msg.WriteString(fmt.Sprintf("📅 <b>Events Viewed:</b> %d\n", stats.EventsViewed))
+
+	// Events marked by status
+	if len(stats.EventsMarked) > 0 {
+		msg.WriteString("\n<b>Events Marked:</b>\n")
+		if count, ok := stats.EventsMarked[preferences.EventStatusInterested]; ok && count > 0 {
+			msg.WriteString(fmt.Sprintf("  ⭐ Interested: %d\n", count))
+		}
+		if count, ok := stats.EventsMarked[preferences.EventStatusRegistered]; ok && count > 0 {
+			msg.WriteString(fmt.Sprintf("  ✅ Registered: %d\n", count))
+		}
+		if count, ok := stats.EventsMarked[preferences.EventStatusMaybe]; ok && count > 0 {
+			msg.WriteString(fmt.Sprintf("  🤔 Maybe: %d\n", count))
+		}
+		if count, ok := stats.EventsMarked[preferences.EventStatusSkip]; ok && count > 0 {
+			msg.WriteString(fmt.Sprintf("  ❌ Skipped: %d\n", count))
+		}
+	}
+
+	// Total marked
+	totalMarked := 0
+	for _, count := range stats.EventsMarked {
+		totalMarked += count
+	}
+	if totalMarked > 0 {
+		msg.WriteString(fmt.Sprintf("\n<b>Total Actions:</b> %d\n", totalMarked))
+	}
+
+	// Show history count for week view
+	if period == "week" || period == "" {
+		msg.WriteString(fmt.Sprintf("\n<i>Week started: %s</i>\n", stats.WeekStart.Format("Jan 2, 2006")))
+		if len(user.StatsHistory) > 0 {
+			msg.WriteString(fmt.Sprintf("\n📈 <b>%d week(s)</b> of history available\n", len(user.StatsHistory)))
+			msg.WriteString("Use /stats all to see all-time stats")
+		}
+	} else {
+		// All-time view
+		weekCount := len(user.StatsHistory) + 1 // +1 for current week
+		msg.WriteString(fmt.Sprintf("\n<i>Tracking for %d week(s)</i>", weekCount))
+	}
+
+	return msg.String()
+}
+
 // handleNear finds events near a specified city
-func handleNear(prefs preferences.Preferences, chatID, cityName, botToken string, dryRun bool) (string, []*event.Event) {
+func handleNear(prefs preferences.Preferences, chatID, cityName, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
 	user := prefs.GetUser(chatID)
 	if len(user.States) == 0 {
 		return "ℹ️ You need to subscribe to at least one state first.\n\nUse /subscribe &lt;STATE&gt; to get started.", nil
@@ -1160,6 +1249,12 @@ func handleNear(prefs preferences.Preferences, chatID, cityName, botToken string
 		}
 	}
 
+	// Track stats: events viewed
+	if !dryRun {
+		user.IncrementEventsViewed(len(matchingEvents))
+		*modified = true
+	}
+
 	return "", nil // Already sent via messages
 }
 
@@ -1222,7 +1317,7 @@ If you're subscribed to any states, you'll receive notifications when new events
 Use /list to see your current subscriptions.`
 }
 
-func handleSearch(prefs preferences.Preferences, chatID, keyword string, botToken string, dryRun bool) (string, []*event.Event) {
+func handleSearch(prefs preferences.Preferences, chatID, keyword string, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
 	// Fetch all events
 	sc := scraper.New()
 	allEvents, err := sc.FetchEvents()
@@ -1304,6 +1399,11 @@ Showing first %d results:`, len(matchingEvents), keyword, len(eventsToSend))
 				time.Sleep(1 * time.Second)
 			}
 		}
+
+		// Track stats: events viewed
+		user := prefs.GetUser(chatID)
+		user.IncrementEventsViewed(len(eventsToSend))
+		*modified = true
 
 		return "", nil // Already sent
 	}
@@ -1409,7 +1509,7 @@ Tap the file to import all events into your calendar app!`, len(filteredEvents),
 	return fmt.Sprintf("[DRY RUN] Would send bulk calendar file with %d events for %s", len(filteredEvents), strings.Join(filterStates, ", ")), nil
 }
 
-func handleMyEvents(prefs preferences.Preferences, chatID string, botToken string, dryRun bool) (string, []*event.Event) {
+func handleMyEvents(prefs preferences.Preferences, chatID string, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
 	user := prefs.GetUser(chatID)
 
 	if len(user.EventStatuses) == 0 {
@@ -1538,13 +1638,17 @@ You have %d tracked event(s):`, totalEvents)
 			}
 		}
 
+		// Track stats: events viewed
+		user.IncrementEventsViewed(totalEvents)
+		*modified = true
+
 		return "", nil // Already sent
 	}
 
 	return fmt.Sprintf("[DRY RUN] Would send %d tracked events", totalEvents), nil
 }
 
-func handleAllEvents(prefs preferences.Preferences, chatID string, botToken string, dryRun bool) (string, []*event.Event) {
+func handleAllEvents(prefs preferences.Preferences, chatID string, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
 	// Get user's subscribed states
 	states := prefs.GetStates(chatID)
 	if len(states) == 0 {
@@ -1636,6 +1740,10 @@ Showing %d event(s), sorted by date:`, len(filteredEvents), strings.Join(states,
 				time.Sleep(1 * time.Second)
 			}
 		}
+
+		// Track stats: events viewed
+		user.IncrementEventsViewed(len(eventsToSend))
+		*modified = true
 
 		return "", nil // Already sent
 	}

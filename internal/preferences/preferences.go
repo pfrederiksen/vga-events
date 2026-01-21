@@ -57,6 +57,29 @@ type UserPreferences struct {
 	// Change notifications (v0.5.0 Enhancement #3)
 	// Whether to be notified when tracked events change (date, title, city)
 	NotifyOnChanges bool `json:"notify_on_changes,omitempty"` // Default: true
+
+	// Weekly statistics (v0.5.0 Enhancement #4)
+	WeeklyStats  *WeeklyStats              `json:"weekly_stats,omitempty"`
+	StatsHistory map[string]*WeeklyStats   `json:"stats_history,omitempty"` // week key → stats
+	EnableStats  bool                      `json:"enable_stats,omitempty"`  // Default: true
+}
+
+// WeeklyStats tracks user engagement metrics for a week
+type WeeklyStats struct {
+	WeekStart        time.Time      `json:"week_start"`
+	EventsViewed     int            `json:"events_viewed"`
+	EventsMarked     map[string]int `json:"events_marked"`     // status → count
+	EventsRegistered int            `json:"events_registered"` // Count of events marked as registered
+	TopStates        []string       `json:"top_states"`        // States with most activity
+}
+
+// NewWeeklyStats creates a new WeeklyStats for the current week
+func NewWeeklyStats() *WeeklyStats {
+	return &WeeklyStats{
+		WeekStart:    time.Now().UTC().Truncate(24 * time.Hour), // Start of today
+		EventsViewed: 0,
+		EventsMarked: make(map[string]int),
+	}
 }
 
 // Preferences maps chat IDs to user preferences
@@ -102,6 +125,16 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		if !user.NotifyOnChanges && len(user.EventStatuses) > 0 {
 			user.NotifyOnChanges = true
 		}
+		// Migration: initialize weekly stats for existing users
+		if user.WeeklyStats == nil {
+			user.WeeklyStats = NewWeeklyStats()
+		}
+		if user.StatsHistory == nil {
+			user.StatsHistory = make(map[string]*WeeklyStats)
+		}
+		if !user.EnableStats && len(user.States) > 0 {
+			user.EnableStats = true // Enable for existing users
+		}
 		// Note: HidePastEvents defaults to false (zero value) for backward compatibility
 		// Users can enable it via settings
 		return user
@@ -121,7 +154,10 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		EventStatuses:   make(map[string]string),
 		ReminderDays:    []int{}, // No reminders by default, user can configure
 		EventNotes:      make(map[string]string),
-		NotifyOnChanges: true, // New feature: notify about event changes
+		NotifyOnChanges: true,              // New feature: notify about event changes
+		WeeklyStats:     NewWeeklyStats(),  // New feature: track weekly stats
+		StatsHistory:    make(map[string]*WeeklyStats),
+		EnableStats:     true,              // Enable stats tracking by default
 	}
 	return p[chatID]
 }
@@ -425,4 +461,85 @@ func (u *UserPreferences) RemoveEventNote(eventID string) {
 	if u.EventNotes != nil {
 		delete(u.EventNotes, eventID)
 	}
+}
+
+// IncrementEventsViewed increments the events viewed counter
+func (u *UserPreferences) IncrementEventsViewed(count int) {
+	if !u.EnableStats {
+		return
+	}
+	if u.WeeklyStats == nil {
+		u.WeeklyStats = NewWeeklyStats()
+	}
+	u.WeeklyStats.EventsViewed += count
+}
+
+// IncrementEventStatus increments the counter for a specific status
+func (u *UserPreferences) IncrementEventStatus(status string) {
+	if !u.EnableStats {
+		return
+	}
+	if u.WeeklyStats == nil {
+		u.WeeklyStats = NewWeeklyStats()
+	}
+	if u.WeeklyStats.EventsMarked == nil {
+		u.WeeklyStats.EventsMarked = make(map[string]int)
+	}
+	u.WeeklyStats.EventsMarked[status]++
+
+	// Track registered events separately
+	if status == EventStatusRegistered {
+		u.WeeklyStats.EventsRegistered++
+	}
+}
+
+// GetWeekKey generates a week key for stats history (format: "2026-W01")
+func GetWeekKey(t time.Time) string {
+	year, week := t.ISOWeek()
+	return fmt.Sprintf("%d-W%02d", year, week)
+}
+
+// ArchiveCurrentWeek moves current week stats to history and starts a new week
+func (u *UserPreferences) ArchiveCurrentWeek() {
+	if u.WeeklyStats == nil {
+		return
+	}
+
+	// Generate key for current week
+	weekKey := GetWeekKey(u.WeeklyStats.WeekStart)
+
+	// Store in history
+	if u.StatsHistory == nil {
+		u.StatsHistory = make(map[string]*WeeklyStats)
+	}
+	u.StatsHistory[weekKey] = u.WeeklyStats
+
+	// Start new week
+	u.WeeklyStats = NewWeeklyStats()
+}
+
+// GetAllTimeStats aggregates stats from all history plus current week
+func (u *UserPreferences) GetAllTimeStats() *WeeklyStats {
+	total := &WeeklyStats{
+		WeekStart:    u.WeeklyStats.WeekStart,
+		EventsViewed: u.WeeklyStats.EventsViewed,
+		EventsMarked: make(map[string]int),
+	}
+
+	// Add current week
+	for status, count := range u.WeeklyStats.EventsMarked {
+		total.EventsMarked[status] += count
+	}
+	total.EventsRegistered = u.WeeklyStats.EventsRegistered
+
+	// Add history
+	for _, stats := range u.StatsHistory {
+		total.EventsViewed += stats.EventsViewed
+		total.EventsRegistered += stats.EventsRegistered
+		for status, count := range stats.EventsMarked {
+			total.EventsMarked[status] += count
+		}
+	}
+
+	return total
 }
