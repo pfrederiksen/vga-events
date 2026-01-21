@@ -4,6 +4,7 @@ A simple, reliable CLI tool to check for newly-added VGA Golf state events witho
 
 ## Features
 
+### CLI Tool
 - Check for new events by state (e.g., `NV`) or all states
 - Tracks events across runs using local snapshots
 - Reports only new events since last check
@@ -12,6 +13,17 @@ A simple, reliable CLI tool to check for newly-added VGA Golf state events witho
 - View all tracked events with `--show-all`
 - JSON or text output formats
 - Exit codes for easy scripting
+
+### Telegram Bot (v0.5.0)
+- **Personalized notifications** - Each user gets their own subscriptions
+- **Event tracking** - Mark events as interested/registered/maybe/skip
+- **Event notes** - Add personal notes to events (NEW in v0.5.0)
+- **Location search** - Find events near a specific city (NEW in v0.5.0)
+- **Event reminders** - Get reminded 1 day, 3 days, 1 week, or 2 weeks before events
+- **Digest modes** - Choose immediate, daily, or weekly notifications
+- **Calendar export** - Download events as .ics files
+- **Bulk actions** - Manage multiple events at once
+- **Multi-user support** - Separate preferences for each user
 
 ## Installation
 
@@ -134,14 +146,22 @@ Send these commands to your bot in Telegram:
 - `/menu` - Quick actions menu with buttons
 - `/help` - Show help message with all commands
 - `/subscribe <STATE>` - Subscribe to a state's events (e.g., `/subscribe NV`)
+- `/unsubscribe <STATE>` - Unsubscribe from a state (e.g., `/unsubscribe CA`)
+- `/unsubscribe all` - Unsubscribe from all states with confirmation (NEW in v0.5.0)
 - `/manage` - Manage your subscriptions with buttons
 - `/list` - Show your current subscriptions
 
 **Event Discovery:**
 - `/search <keyword>` - Search for events (e.g., `/search "Pine Valley"`)
+- `/near <city>` - Find events near a city (e.g., `/near Las Vegas`)
 - `/events` - View all events for your subscribed states
 - `/my-events` - View events you've marked as interested/registered
 - `/export-calendar` - Download all events as .ics calendar file
+
+**Event Notes:**
+- `/note <event_id> <text>` - Add a personal note to an event
+- `/note <event_id> clear` - Remove a note from an event
+- `/notes` - List all events with notes
 
 **Event Tracking:**
 When you receive event notifications, use the status buttons to track them:
