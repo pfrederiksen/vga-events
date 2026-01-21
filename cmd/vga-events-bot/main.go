@@ -26,8 +26,8 @@ var (
 )
 
 type Update struct {
-	UpdateID      int                      `json:"update_id"`
-	Message       *Message                 `json:"message,omitempty"`
+	UpdateID      int                     `json:"update_id"`
+	Message       *Message                `json:"message,omitempty"`
 	CallbackQuery *telegram.CallbackQuery `json:"callback_query,omitempty"`
 }
 
@@ -339,17 +339,25 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 	if !dryRun {
 		client, err := telegram.NewClient(botToken, chatID)
 		if err == nil {
-			client.AnswerCallbackQuery(callback.ID, "", false)
+			if err := client.AnswerCallbackQuery(callback.ID, "", false); err != nil {
+				fmt.Fprintf(os.Stderr, "Error answering callback: %v\n", err)
+			}
 
 			// Edit the message with new text and keyboard
 			if messageID > 0 {
-				client.EditMessageText(chatID, messageID, responseText, keyboard)
+				if err := client.EditMessageText(chatID, messageID, responseText, keyboard); err != nil {
+					fmt.Fprintf(os.Stderr, "Error editing message: %v\n", err)
+				}
 			} else {
 				// If no message ID, send new message
+				var sendErr error
 				if keyboard != nil {
-					client.SendMessageWithKeyboard(responseText, keyboard)
+					sendErr = client.SendMessageWithKeyboard(responseText, keyboard)
 				} else {
-					client.SendMessage(responseText)
+					sendErr = client.SendMessage(responseText)
+				}
+				if sendErr != nil {
+					fmt.Fprintf(os.Stderr, "Error sending message: %v\n", err)
 				}
 			}
 		}
@@ -638,7 +646,9 @@ func handleSubscribeWithKeyboard(chatID, botToken string, dryRun bool) (string, 
 	if !dryRun {
 		client, err := telegram.NewClient(botToken, chatID)
 		if err == nil {
-			client.SendMessageWithKeyboard(text, keyboard)
+			if err := client.SendMessageWithKeyboard(text, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending keyboard: %v\n", err)
+			}
 			return "", nil // Already sent via keyboard
 		}
 	}
@@ -653,7 +663,9 @@ func handleManageWithKeyboard(prefs preferences.Preferences, chatID, botToken st
 	if keyboard != nil && !dryRun {
 		client, err := telegram.NewClient(botToken, chatID)
 		if err == nil {
-			client.SendMessageWithKeyboard(text, keyboard)
+			if err := client.SendMessageWithKeyboard(text, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending keyboard: %v\n", err)
+			}
 			return "", nil // Already sent via keyboard
 		}
 	}
@@ -668,7 +680,9 @@ func handleSettingsWithKeyboard(prefs preferences.Preferences, chatID, botToken 
 	if !dryRun {
 		client, err := telegram.NewClient(botToken, chatID)
 		if err == nil {
-			client.SendMessageWithKeyboard(text, keyboard)
+			if err := client.SendMessageWithKeyboard(text, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending keyboard: %v\n", err)
+			}
 			return "", nil // Already sent via keyboard
 		}
 	}

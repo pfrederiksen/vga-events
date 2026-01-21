@@ -9,6 +9,13 @@ import (
 	"github.com/pfrederiksen/vga-events/internal/event"
 )
 
+const (
+	// DigestFrequency constants
+	DigestFrequencyImmediate = "immediate"
+	DigestFrequencyDaily     = "daily"
+	DigestFrequencyWeekly    = "weekly"
+)
+
 // UserPreferences represents a user's subscription preferences
 type UserPreferences struct {
 	// Core subscription settings
@@ -20,10 +27,10 @@ type UserPreferences struct {
 	SeenEventIDs map[string]int64 `json:"seen_event_ids,omitempty"`
 
 	// Digest mode configuration (Feature 4)
-	DigestFrequency string         `json:"digest_frequency,omitempty"` // "immediate", "daily", "weekly"
+	DigestFrequency string         `json:"digest_frequency,omitempty"`   // "immediate", "daily", "weekly"
 	DigestDayOfWeek int            `json:"digest_day_of_week,omitempty"` // 0-6 for weekly digest
-	DigestHour      int            `json:"digest_hour,omitempty"`      // 0-23 UTC
-	PendingEvents   []*event.Event `json:"pending_events,omitempty"`   // Events queued for digest
+	DigestHour      int            `json:"digest_hour,omitempty"`        // 0-23 UTC
+	PendingEvents   []*event.Event `json:"pending_events,omitempty"`     // Events queued for digest
 
 	// Time-based filtering (Feature 3)
 	DaysAhead      int  `json:"days_ahead,omitempty"`       // 0 = disabled, >0 = only show events within N days
@@ -55,7 +62,7 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 			user.SeenEventIDs = make(map[string]int64)
 		}
 		if user.DigestFrequency == "" {
-			user.DigestFrequency = "immediate" // Keep current behavior
+			user.DigestFrequency = DigestFrequencyImmediate // Keep current behavior
 		}
 		if user.DigestHour == 0 && user.DigestFrequency != "immediate" {
 			user.DigestHour = 9 // 9 AM UTC default
@@ -73,7 +80,7 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		States:          []string{},
 		Active:          true,
 		SeenEventIDs:    make(map[string]int64),
-		DigestFrequency: "immediate",
+		DigestFrequency: DigestFrequencyImmediate,
 		DigestHour:      9,
 		DigestDayOfWeek: 1,
 		DaysAhead:       0,    // Disabled by default
@@ -276,7 +283,7 @@ func (u *UserPreferences) ClearPendingEvents() {
 // Valid values: "immediate", "daily", "weekly"
 func (u *UserPreferences) SetDigestFrequency(frequency string) bool {
 	frequency = strings.ToLower(strings.TrimSpace(frequency))
-	if frequency != "immediate" && frequency != "daily" && frequency != "weekly" {
+	if frequency != DigestFrequencyImmediate && frequency != DigestFrequencyDaily && frequency != DigestFrequencyWeekly {
 		return false
 	}
 	u.DigestFrequency = frequency

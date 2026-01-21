@@ -7,12 +7,12 @@ import (
 
 func TestParseDate(t *testing.T) {
 	tests := []struct {
-		name     string
-		dateText string
-		wantYear int
+		name      string
+		dateText  string
+		wantYear  int
 		wantMonth time.Month
-		wantDay  int
-		wantZero bool
+		wantDay   int
+		wantZero  bool
 	}{
 		{
 			name:      "Full date Mar 13 2026",
@@ -64,14 +64,14 @@ func TestParseDate(t *testing.T) {
 			wantDay:   2,
 		},
 		{
-			name:      "Empty string",
-			dateText:  "",
-			wantZero:  true,
+			name:     "Empty string",
+			dateText: "",
+			wantZero: true,
 		},
 		{
-			name:      "Invalid format",
-			dateText:  "Not a date",
-			wantZero:  true,
+			name:     "Invalid format",
+			dateText: "Not a date",
+			wantZero: true,
 		},
 	}
 
@@ -94,6 +94,22 @@ func TestParseDate(t *testing.T) {
 			}
 			if got.Day() != tt.wantDay {
 				t.Errorf("ParseDate(%q).Day() = %d, want %d", tt.dateText, got.Day(), tt.wantDay)
+			}
+		})
+	}
+}
+
+// testBoolMethod is a helper for testing methods that return bool
+func testBoolMethod(t *testing.T, methodName string, tests []struct {
+	name     string
+	dateText string
+	want     bool
+}, fn func(*Event) bool) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evt := &Event{DateText: tt.dateText}
+			if got := fn(evt); got != tt.want {
+				t.Errorf("Event.%s() = %v, want %v", methodName, got, tt.want)
 			}
 		})
 	}
@@ -127,14 +143,7 @@ func TestEvent_IsPastEvent(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			evt := &Event{DateText: tt.dateText}
-			if got := evt.IsPastEvent(); got != tt.want {
-				t.Errorf("Event.IsPastEvent() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	testBoolMethod(t, "IsPastEvent", tests, (*Event).IsPastEvent)
 }
 
 func TestEvent_IsWithinDays(t *testing.T) {
@@ -224,12 +233,5 @@ func TestEvent_IsUpcoming(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			evt := &Event{DateText: tt.dateText}
-			if got := evt.IsUpcoming(); got != tt.want {
-				t.Errorf("Event.IsUpcoming() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	testBoolMethod(t, "IsUpcoming", tests, (*Event).IsUpcoming)
 }

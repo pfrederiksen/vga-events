@@ -45,9 +45,9 @@ func GenerateICS(evt *event.Event) string {
 	ics.WriteString(fmt.Sprintf("SUMMARY:%s\r\n", escapeICS(summary)))
 
 	// DESCRIPTION - event details
-	description := fmt.Sprintf("%s - %s\\n\\nRegister at: https://vgagolf.org/state-events", evt.State, evt.Title)
+	description := fmt.Sprintf("%s - %s\n\nRegister at: https://vgagolf.org/state-events", evt.State, evt.Title)
 	if evt.DateText != "" {
-		description = fmt.Sprintf("Date: %s\\n%s", evt.DateText, description)
+		description = fmt.Sprintf("Date: %s\n%s", evt.DateText, description)
 	}
 	ics.WriteString(fmt.Sprintf("DESCRIPTION:%s\r\n", escapeICS(description)))
 

@@ -16,7 +16,12 @@ func FormatDigest(events []*event.Event, frequency string) string {
 
 	// Header
 	msg := "📬 <b>Your VGA Events Digest</b>\n\n"
-	msg += fmt.Sprintf("🗓 %s digest • %d new event(s)\n\n", strings.Title(frequency), len(events))
+	// Capitalize first letter of frequency
+	freqCapitalized := frequency
+	if len(frequency) > 0 {
+		freqCapitalized = strings.ToUpper(frequency[:1]) + frequency[1:]
+	}
+	msg += fmt.Sprintf("🗓 %s digest • %d new event(s)\n\n", freqCapitalized, len(events))
 
 	// Group events by state
 	byState := make(map[string][]*event.Event)

@@ -81,7 +81,9 @@ func (e *Event) IsWithinDays(days int) bool {
 	}
 	now := time.Now()
 	cutoff := now.AddDate(0, 0, days)
-	return parsed.After(now) && parsed.Before(cutoff)
+	// Compare dates only (truncate to start of day) to include today's events
+	nowDate := now.Truncate(24 * time.Hour)
+	return !parsed.Before(nowDate) && parsed.Before(cutoff)
 }
 
 // IsUpcoming checks if an event is in the future (not past).
