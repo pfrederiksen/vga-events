@@ -500,7 +500,7 @@ func TestIsValidEventStatus(t *testing.T) {
 		{"registered", true},
 		{"maybe", true},
 		{"skip", true},
-		{"INTERESTED", true}, // case insensitive
+		{"INTERESTED", true},     // case insensitive
 		{"  registered  ", true}, // whitespace
 		{"invalid", false},
 		{"", false},

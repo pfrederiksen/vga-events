@@ -451,6 +451,7 @@ Sorted by soonest first:`, len(eventsToSend), len(filteredEvents), strings.Join(
 	return fmt.Sprintf("[DRY RUN] Would send %d upcoming events", len(eventsToSend))
 }
 
+//nolint:gocyclo // Callback handler complexity is inherent to handling multiple callback types
 func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.CallbackQuery, modified *bool, botToken string, dryRun bool) {
 	chatID := fmt.Sprintf("%d", callback.From.ID)
 	messageID := 0
@@ -1140,7 +1141,7 @@ Tap the file to import all events into your calendar app!`, len(filteredEvents),
 func handleMyEvents(prefs preferences.Preferences, chatID string, botToken string, dryRun bool) (string, []*event.Event) {
 	user := prefs.GetUser(chatID)
 
-	if user.EventStatuses == nil || len(user.EventStatuses) == 0 {
+	if len(user.EventStatuses) == 0 {
 		return `⭐ <b>My Events</b>
 
 You haven't marked any events yet.
