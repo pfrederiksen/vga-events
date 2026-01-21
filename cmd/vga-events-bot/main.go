@@ -20,6 +20,9 @@ import (
 const (
 	// AllStatesCode is the special state code to match all states
 	AllStatesCode = "ALL"
+
+	// Error messages
+	errFetchingEvents = "❌ Error fetching events. Please try again later."
 )
 
 var (
@@ -385,7 +388,7 @@ Use /subscribe to start receiving event notifications!`
 	allEvents, err := sc.FetchEvents()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
-		return "❌ Error fetching events. Please try again later."
+		return errFetchingEvents
 	}
 
 	// Filter events by subscribed states
@@ -980,7 +983,7 @@ func handleSearch(prefs preferences.Preferences, chatID, keyword string, botToke
 	allEvents, err := sc.FetchEvents()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
-		return "❌ Error fetching events. Please try again later.", nil
+		return errFetchingEvents, nil
 	}
 
 	// Filter events by keyword (case-insensitive search in title, city, state)
@@ -1085,7 +1088,7 @@ Or use /export-calendar &lt;STATE&gt; to export events from a specific state.`, 
 	allEvents, err := sc.FetchEvents()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
-		return "❌ Error fetching events. Please try again later.", nil
+		return errFetchingEvents, nil
 	}
 
 	// Filter events by states
@@ -1170,7 +1173,7 @@ Then use /my-events to see all your tracked events!`, nil
 	allEvents, err := sc.FetchEvents()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
-		return "❌ Error fetching events. Please try again later.", nil
+		return errFetchingEvents, nil
 	}
 
 	// Create a map of event IDs to events for quick lookup
@@ -1298,7 +1301,7 @@ Use /subscribe to start receiving events!`, nil
 	allEvents, err := sc.FetchEvents()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
-		return "❌ Error fetching events. Please try again later.", nil
+		return errFetchingEvents, nil
 	}
 
 	// Filter events by subscribed states
