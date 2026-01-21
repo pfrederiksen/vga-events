@@ -847,7 +847,14 @@ You'll receive messages whenever new events are posted in your subscribed states
 
 Change your preferences with /settings
 
-Checks run every hour.`, AllStatesCode)
+Checks run every hour.
+
+━━━━━━━━━━━━━━━━━━━━━━
+<b>Support &amp; Info:</b>
+Need help or have feedback? Contact @iamdesertpaul
+
+Created by Paul Frederiksen
+Open source at github.com/pfrederiksen/vga-events`, AllStatesCode)
 }
 
 func handleSubscribe(prefs preferences.Preferences, chatID, state string, modified *bool, botToken string, dryRun bool) (string, []*event.Event) {
