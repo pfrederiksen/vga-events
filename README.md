@@ -233,6 +233,12 @@ export TELEGRAM_GITHUB_TOKEN=your_github_token
 
 See [CLAUDE.md](CLAUDE.md) for development workflow.
 
+## Author
+
+Created by **Paul Frederiksen** ([@iamdesertpaul](https://t.me/iamdesertpaul))
+
+For questions, issues, or feedback about the Telegram bot, reach out on Telegram: @iamdesertpaul
+
 ## License
 
 MIT License - see [LICENSE](LICENSE)
