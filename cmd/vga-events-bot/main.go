@@ -37,6 +37,8 @@ var (
 	digest     = flag.String("digest", "", "Send digest to specific chat ID (used by GitHub Actions)")
 	digestFile = flag.String("digest-file", "", "Path to digest events JSON file")
 	digestType = flag.String("digest-type", "daily", "Type of digest: daily or weekly")
+	// Stats rollover flag
+	archiveWeeklyStats = flag.Bool("archive-weekly-stats", false, "Archive current week's stats to history for all users")
 )
 
 type Update struct {
@@ -104,6 +106,12 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading preferences: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Archive weekly stats mode: archive stats and exit
+	if *archiveWeeklyStats {
+		archiveWeeklyStatsForAllUsers(prefs, storage)
+		os.Exit(0)
 	}
 
 	fmt.Printf("Loaded preferences for %d users\n", len(prefs))
@@ -2327,4 +2335,37 @@ func handleBulkCallback(prefs preferences.Preferences, chatID, action string, mo
 	default:
 		return "❌ Unknown bulk action", nil
 	}
+}
+
+// archiveWeeklyStatsForAllUsers archives the current week's stats to history for all users
+func archiveWeeklyStatsForAllUsers(prefs preferences.Preferences, storage *preferences.GistStorage) {
+	fmt.Println("📊 Archiving weekly stats for all users...")
+
+	chatIDs := prefs.GetAllUsers()
+	if len(chatIDs) == 0 {
+		fmt.Println("ℹ️ No users found")
+		return
+	}
+
+	archivedCount := 0
+	for _, chatID := range chatIDs {
+		user := prefs.GetUser(chatID)
+		if !user.EnableStats {
+			continue
+		}
+
+		// Archive current week to history
+		user.ArchiveCurrentWeek()
+		archivedCount++
+
+		fmt.Printf("✅ Archived stats for user %s\n", chatID)
+	}
+
+	// Save updated preferences
+	if err := storage.Save(prefs); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving preferences: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ Successfully archived stats for %d user(s)\n", archivedCount)
 }
