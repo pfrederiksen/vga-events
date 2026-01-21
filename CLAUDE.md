@@ -71,9 +71,12 @@ The project includes an interactive Telegram bot with personalized notifications
 - **vga-events-telegram** - Sends notifications to Telegram
 - **vga-events-bot** - Processes user commands (/subscribe, /unsubscribe, etc.)
 
-**Three workflows:**
+**Six workflows:**
 - **telegram-bot-commands.yml** - Processes commands every 15 minutes
 - **telegram-bot.yml** - Checks for events hourly, sends personalized notifications
+- **telegram-daily-digest.yml** - Sends daily digest at 9 AM UTC for digest mode users
+- **telegram-weekly-digest.yml** - Sends weekly digest on Mondays at 9 AM UTC
+- **telegram-reminders.yml** - Sends event reminders daily at 9 AM UTC
 - **ci.yml** - Runs tests and builds on PRs
 
 **Storage:**
@@ -89,6 +92,9 @@ The project includes an interactive Telegram bot with personalized notifications
 4. **cmd/vga-events-telegram** - Notification sender
 5. **.github/workflows/telegram-bot-commands.yml** - Command processing
 6. **.github/workflows/telegram-bot.yml** - Personalized notifications
+7. **.github/workflows/telegram-daily-digest.yml** - Daily digest delivery
+8. **.github/workflows/telegram-weekly-digest.yml** - Weekly digest delivery
+9. **.github/workflows/telegram-reminders.yml** - Event reminder delivery
 
 ### Local Development
 

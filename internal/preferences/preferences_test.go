@@ -613,3 +613,134 @@ func TestReminderDaysMigration(t *testing.T) {
 		t.Error("Should be able to set reminder days")
 	}
 }
+
+func TestUserPreferences_SetEventNote(t *testing.T) {
+	user := &UserPreferences{}
+
+	// Set a note for an event
+	user.SetEventNote("event123", "This is a great event!")
+
+	// Verify EventNotes was initialized
+	if user.EventNotes == nil {
+		t.Error("EventNotes map should be initialized")
+	}
+
+	// Verify the note was set
+	if got := user.EventNotes["event123"]; got != "This is a great event!" {
+		t.Errorf("EventNotes[event123] = %q, want %q", got, "This is a great event!")
+	}
+
+	// Update the note
+	user.SetEventNote("event123", "Updated note")
+	if got := user.EventNotes["event123"]; got != "Updated note" {
+		t.Errorf("EventNotes[event123] = %q, want %q", got, "Updated note")
+	}
+
+	// Add another note
+	user.SetEventNote("event456", "Another event note")
+	if len(user.EventNotes) != 2 {
+		t.Errorf("EventNotes length = %d, want 2", len(user.EventNotes))
+	}
+}
+
+func TestUserPreferences_GetEventNote(t *testing.T) {
+	user := &UserPreferences{
+		EventNotes: map[string]string{
+			"event123": "Great tournament",
+			"event456": "Bring extra balls",
+		},
+	}
+
+	tests := []struct {
+		name    string
+		eventID string
+		want    string
+	}{
+		{
+			name:    "Existing note",
+			eventID: "event123",
+			want:    "Great tournament",
+		},
+		{
+			name:    "Another existing note",
+			eventID: "event456",
+			want:    "Bring extra balls",
+		},
+		{
+			name:    "Non-existent event",
+			eventID: "event999",
+			want:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := user.GetEventNote(tt.eventID)
+			if got != tt.want {
+				t.Errorf("GetEventNote(%q) = %q, want %q", tt.eventID, got, tt.want)
+			}
+		})
+	}
+
+	// Test with nil EventNotes
+	user2 := &UserPreferences{}
+	if got := user2.GetEventNote("event123"); got != "" {
+		t.Errorf("GetEventNote with nil map = %q, want empty string", got)
+	}
+}
+
+func TestUserPreferences_RemoveEventNote(t *testing.T) {
+	user := &UserPreferences{
+		EventNotes: map[string]string{
+			"event123": "Great tournament",
+			"event456": "Bring extra balls",
+			"event789": "Early tee time",
+		},
+	}
+
+	// Remove a note
+	user.RemoveEventNote("event456")
+
+	// Verify it was removed
+	if _, exists := user.EventNotes["event456"]; exists {
+		t.Error("event456 should have been removed")
+	}
+
+	// Verify others still exist
+	if len(user.EventNotes) != 2 {
+		t.Errorf("EventNotes length = %d, want 2", len(user.EventNotes))
+	}
+
+	// Remove non-existent note (should not error)
+	user.RemoveEventNote("event999")
+	if len(user.EventNotes) != 2 {
+		t.Errorf("EventNotes length = %d, want 2", len(user.EventNotes))
+	}
+
+	// Test with nil EventNotes (should not panic)
+	user2 := &UserPreferences{}
+	user2.RemoveEventNote("event123") // Should not panic
+}
+
+func TestUserPreferences_EventNotes_Migration(t *testing.T) {
+	// Test that GetUser initializes EventNotes for existing users
+	prefs := NewPreferences()
+
+	// Create a user without EventNotes (simulating old data)
+	prefs["user123"] = &UserPreferences{
+		States: []string{"NV"},
+		Active: true,
+	}
+
+	// GetUser should initialize EventNotes
+	user := prefs.GetUser("user123")
+	if user.EventNotes == nil {
+		t.Error("GetUser should initialize EventNotes map")
+	}
+
+	// Should be able to use EventNotes immediately
+	user.SetEventNote("event123", "Test note")
+	if got := user.GetEventNote("event123"); got != "Test note" {
+		t.Errorf("GetEventNote = %q, want %q", got, "Test note")
+	}
+}

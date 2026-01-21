@@ -1,0 +1,127 @@
+name: Send Weekly Digests
+
+on:
+  schedule:
+    # Run weekly on Monday at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: read
+
+jobs:
+  send-weekly-digests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build bot
+        run: go build -o vga-events-bot ./cmd/vga-events-bot
+
+      - name: Load user preferences
+        id: prefs
+        env:
+          TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
+          TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
+        run: |
+          # Fetch preferences from Gist
+          PREFS_JSON=$(curl -s -H "Authorization: token $TELEGRAM_GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/gists/$TELEGRAM_GIST_ID" | \
+            jq -r '.files["preferences.json"].content')
+
+          echo "$PREFS_JSON" > preferences.json
+
+          # Get list of users with weekly digest mode and pending events
+          USERS=$(echo "$PREFS_JSON" | jq -r 'to_entries[] | select(.value.active == true and .value.digest_frequency == "weekly" and (.value.pending_events | length) > 0) | .key')
+          echo "users<<EOF" >> $GITHUB_OUTPUT
+          echo "$USERS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          USER_COUNT=$(echo "$USERS" | wc -l | tr -d ' ')
+          echo "Found $USER_COUNT user(s) with weekly digest pending"
+
+      - name: Send digests
+        if: steps.prefs.outputs.users != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
+          TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
+        run: |
+          # Track whether we need to save preferences
+          PREFS_MODIFIED=false
+
+          # For each user, send digest and clear pending events
+          while IFS= read -r CHAT_ID; do
+            [ -z "$CHAT_ID" ] && continue
+
+            echo "Processing weekly digest for user $CHAT_ID..."
+
+            # Get user's pending events
+            EVENT_COUNT=$(jq -r --arg chat "$CHAT_ID" '.[$chat].pending_events | length' preferences.json)
+
+            echo "  Pending events: $EVENT_COUNT"
+
+            if [ "$EVENT_COUNT" -gt 0 ]; then
+              # Extract pending events to temporary file
+              jq --arg chat "$CHAT_ID" '{
+                checked_at: now | todate,
+                new_events: .[$chat].pending_events,
+                event_count: (.[$chat].pending_events | length)
+              }' preferences.json > "digest_${CHAT_ID}.json"
+
+              # Send digest via bot (using special digest command)
+              # The bot will format it as a digest message
+              if ./vga-events-bot --bot-token "$TELEGRAM_BOT_TOKEN" --digest "$CHAT_ID" --digest-file "digest_${CHAT_ID}.json" --digest-type weekly 2>/dev/null; then
+                echo "  ✅ Sent weekly digest with $EVENT_COUNT event(s)"
+
+                # Clear pending events for this user
+                jq --arg chat "$CHAT_ID" '.[$chat].pending_events = []' \
+                  preferences.json > preferences.tmp && mv preferences.tmp preferences.json
+
+                PREFS_MODIFIED=true
+              else
+                echo "  ❌ Failed to send digest"
+              fi
+
+              rm -f "digest_${CHAT_ID}.json"
+            fi
+
+          done <<< "${{ steps.prefs.outputs.users }}"
+
+          # Save updated preferences back to Gist if modified
+          if [ "$PREFS_MODIFIED" = true ]; then
+            echo ""
+            echo "Saving updated preferences to Gist..."
+
+            # Update Gist with modified preferences
+            GIST_CONTENT=$(jq -Rs . preferences.json)
+            curl -s -X PATCH \
+              -H "Authorization: token $TELEGRAM_GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/gists/$TELEGRAM_GIST_ID" \
+              -d "{\"files\":{\"preferences.json\":{\"content\":$GIST_CONTENT}}}" > /dev/null
+
+            echo "✅ Preferences saved"
+          else
+            echo "No preference updates needed"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.prefs.outputs.users }}" == "" ]; then
+            echo "ℹ️ No users with weekly digest pending"
+          else
+            echo "✅ Processed weekly digests"
+          fi

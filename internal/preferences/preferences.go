@@ -49,6 +49,10 @@ type UserPreferences struct {
 	// Event reminders (Week 3)
 	// Days before event to send reminders (e.g., [1, 3, 7] means 1 day, 3 days, and 1 week before)
 	ReminderDays []int `json:"reminder_days,omitempty"`
+
+	// Personal event notes
+	// Key: event.ID, Value: user's personal note
+	EventNotes map[string]string `json:"event_notes,omitempty"`
 }
 
 // Preferences maps chat IDs to user preferences
@@ -87,6 +91,9 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		if user.EventStatuses == nil {
 			user.EventStatuses = make(map[string]string)
 		}
+		if user.EventNotes == nil {
+			user.EventNotes = make(map[string]string)
+		}
 		// Note: HidePastEvents defaults to false (zero value) for backward compatibility
 		// Users can enable it via settings
 		return user
@@ -105,6 +112,7 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		PendingEvents:   []*event.Event{},
 		EventStatuses:   make(map[string]string),
 		ReminderDays:    []int{}, // No reminders by default, user can configure
+		EventNotes:      make(map[string]string),
 	}
 	return p[chatID]
 }
@@ -384,4 +392,28 @@ func (u *UserPreferences) HasReminderDay(day int) bool {
 		}
 	}
 	return false
+}
+
+// SetEventNote sets a personal note for an event.
+func (u *UserPreferences) SetEventNote(eventID, note string) {
+	if u.EventNotes == nil {
+		u.EventNotes = make(map[string]string)
+	}
+	u.EventNotes[eventID] = note
+}
+
+// GetEventNote retrieves the note for an event.
+// Returns empty string if no note exists.
+func (u *UserPreferences) GetEventNote(eventID string) string {
+	if u.EventNotes == nil {
+		return ""
+	}
+	return u.EventNotes[eventID]
+}
+
+// RemoveEventNote removes a note for an event.
+func (u *UserPreferences) RemoveEventNote(eventID string) {
+	if u.EventNotes != nil {
+		delete(u.EventNotes, eventID)
+	}
 }

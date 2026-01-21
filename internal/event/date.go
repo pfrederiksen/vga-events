@@ -125,3 +125,77 @@ func SortByDate(events []*Event) {
 		return dateI.Before(dateJ)
 	})
 }
+
+// FormatDateNice formats a date with day of week and countdown
+// Returns enhanced date string like "Fri, Mar 15, 2026 (in 45 days)"
+// Falls back to original dateText if parsing fails
+func FormatDateNice(dateText string) string {
+	if dateText == "" {
+		return ""
+	}
+
+	parsed := ParseDate(dateText)
+	if parsed.IsZero() {
+		// Can't parse, return original
+		return dateText
+	}
+
+	// Format: "Mon, Jan 2, 2006"
+	formatted := parsed.Format("Mon, Jan 2, 2006")
+
+	// Add countdown
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	eventDate := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, now.Location())
+	daysUntil := int(eventDate.Sub(today).Hours() / 24)
+
+	if daysUntil == 0 {
+		formatted += " (today!)"
+	} else if daysUntil == 1 {
+		formatted += " (tomorrow)"
+	} else if daysUntil > 1 && daysUntil <= 30 {
+		formatted += " (in " + formatDays(daysUntil) + ")"
+	} else if daysUntil < 0 {
+		daysAgo := -daysUntil
+		if daysAgo == 1 {
+			formatted += " (yesterday)"
+		} else {
+			formatted += " (" + formatDays(daysAgo) + " ago)"
+		}
+	}
+
+	return formatted
+}
+
+// formatDays returns a nice string for day counts
+func formatDays(days int) string {
+	if days == 7 {
+		return "1 week"
+	} else if days == 14 {
+		return "2 weeks"
+	} else if days == 21 {
+		return "3 weeks"
+	} else if days > 7 && days < 14 {
+		weeks := days / 7
+		remainingDays := days % 7
+		if remainingDays == 0 {
+			return formatDays(days / 7 * 7)
+		}
+		return formatDays(weeks*7) + " " + formatDays(remainingDays)
+	}
+	if days == 1 {
+		return "1 day"
+	}
+	return formatInt(days) + " days"
+}
+
+// formatInt converts int to string without importing strconv
+func formatInt(n int) string {
+	if n < 0 {
+		return "-" + formatInt(-n)
+	}
+	if n < 10 {
+		return string(rune('0' + n))
+	}
+	return formatInt(n/10) + string(rune('0'+n%10))
+}
