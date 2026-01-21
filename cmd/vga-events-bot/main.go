@@ -14,7 +14,6 @@ import (
 	"github.com/pfrederiksen/vga-events/internal/event"
 	"github.com/pfrederiksen/vga-events/internal/preferences"
 	"github.com/pfrederiksen/vga-events/internal/scraper"
-	"github.com/pfrederiksen/vga-events/internal/storage"
 	"github.com/pfrederiksen/vga-events/internal/telegram"
 )
 
@@ -422,19 +421,27 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 		// Calendar download - fetch event and send .ics file
 		eventID := param
 
-		// Initialize storage to retrieve the event
-		stor, err := storage.New(".snapshots")
+		// Fetch fresh events from VGA website to find the event
+		sc := scraper.New()
+		allEvents, err := sc.FetchEvents()
 		if err != nil {
-			responseText = "❌ Error accessing event data"
-			fmt.Fprintf(os.Stderr, "Error initializing storage: %v\n", err)
+			responseText = "❌ Error fetching event data"
+			fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
 			break
 		}
 
-		// Get the event by ID
-		evt, err := stor.GetEventByID(eventID)
-		if err != nil {
-			responseText = "❌ Event not found. This event may have been removed."
-			fmt.Fprintf(os.Stderr, "Error retrieving event %s: %v\n", eventID, err)
+		// Find the event by ID
+		var evt *event.Event
+		for _, e := range allEvents {
+			if e.ID == eventID {
+				evt = e
+				break
+			}
+		}
+
+		if evt == nil {
+			responseText = "❌ Event not found. This event may have been removed from the VGA website."
+			fmt.Fprintf(os.Stderr, "Event %s not found in current events\n", eventID)
 			break
 		}
 
