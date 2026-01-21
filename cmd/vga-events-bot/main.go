@@ -276,6 +276,93 @@ func runOnce(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 	}
 }
 
+func handlePreviewCallback(prefs preferences.Preferences, callback *telegram.CallbackQuery, modified *bool, botToken string, dryRun bool) string {
+	// Handle event preview request after subscription
+	// Format: preview:STATE:COUNT (e.g., "preview:NV:5" or "preview:CA:all")
+	parts := strings.Split(callback.Data, ":")
+	if len(parts) != 3 {
+		return "❌ Invalid preview request"
+	}
+
+	state := parts[1]
+	countStr := parts[2]
+
+	// Fetch current events for this state
+	sc := scraper.New()
+	allEvents, err := sc.FetchEvents()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
+		return "❌ Error fetching events"
+	}
+
+	// Filter events by state and sort by date (soonest first)
+	var stateEvents []*event.Event
+	for _, evt := range allEvents {
+		if state == "ALL" || strings.EqualFold(evt.State, state) {
+			stateEvents = append(stateEvents, evt)
+		}
+	}
+
+	// Sort by date (soonest first)
+	event.SortByDate(stateEvents)
+
+	// Determine how many to send
+	var eventsToSend []*event.Event
+	responseText := ""
+
+	if countStr == "0" {
+		// User chose not to see events
+		responseText = "✅ Got it! You'll only be notified about new events going forward."
+	} else if countStr == "all" {
+		eventsToSend = stateEvents
+	} else {
+		count := 0
+		if _, err := fmt.Sscanf(countStr, "%d", &count); err == nil {
+			if count > 0 && count < len(stateEvents) {
+				eventsToSend = stateEvents[:count]
+			} else {
+				eventsToSend = stateEvents
+			}
+		} else {
+			eventsToSend = stateEvents // Default to all if parsing fails
+		}
+	}
+
+	// Mark ALL state events as seen (not just the ones we're sending)
+	callbackChatID := fmt.Sprintf("%d", callback.From.ID)
+	user := prefs.GetUser(callbackChatID)
+	for _, evt := range stateEvents {
+		user.MarkEventSeen(evt.ID)
+	}
+	*modified = true
+
+	// Send the requested events
+	if len(eventsToSend) > 0 && !dryRun {
+		client, err := telegram.NewClient(botToken, callbackChatID)
+		if err != nil {
+			return fmt.Sprintf("❌ Error sending events: %v", err)
+		}
+
+		for i, evt := range eventsToSend {
+			msg, keyboard := telegram.FormatEventWithCalendar(evt)
+			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
+			}
+
+			// Rate limiting
+			if i < len(eventsToSend)-1 {
+				time.Sleep(1 * time.Second)
+			}
+		}
+
+		return fmt.Sprintf("✅ Sent %d event(s)! All events marked as seen.", len(eventsToSend))
+	} else if len(eventsToSend) > 0 {
+		return fmt.Sprintf("[DRY RUN] Would send %d event(s)", len(eventsToSend))
+	}
+
+	return responseText
+}
+
 func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.CallbackQuery, modified *bool, botToken string, dryRun bool) {
 	chatID := fmt.Sprintf("%d", callback.From.ID)
 	messageID := 0
@@ -329,86 +416,7 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 		}
 
 	case "preview":
-		// Handle event preview request after subscription
-		// Format: preview:STATE:COUNT (e.g., "preview:NV:5" or "preview:CA:all")
-		parts := strings.Split(callback.Data, ":")
-		if len(parts) != 3 {
-			responseText = "❌ Invalid preview request"
-			break
-		}
-
-		state := parts[1]
-		countStr := parts[2]
-
-		// Fetch current events for this state
-		sc := scraper.New()
-		allEvents, err := sc.FetchEvents()
-		if err != nil {
-			responseText = "❌ Error fetching events"
-			fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
-			break
-		}
-
-		// Filter events by state and sort by date (soonest first)
-		var stateEvents []*event.Event
-		for _, evt := range allEvents {
-			if state == "ALL" || strings.EqualFold(evt.State, state) {
-				stateEvents = append(stateEvents, evt)
-			}
-		}
-
-		// Sort by date (soonest first)
-		event.SortByDate(stateEvents)
-
-		// Determine how many to send
-		var eventsToSend []*event.Event
-		if countStr == "0" {
-			// User chose not to see events
-			responseText = "✅ Got it! You'll only be notified about new events going forward."
-		} else if countStr == "all" {
-			eventsToSend = stateEvents
-		} else {
-			count := 0
-			fmt.Sscanf(countStr, "%d", &count)
-			if count > 0 && count < len(stateEvents) {
-				eventsToSend = stateEvents[:count]
-			} else {
-				eventsToSend = stateEvents
-			}
-		}
-
-		// Mark ALL state events as seen (not just the ones we're sending)
-		callbackChatID := fmt.Sprintf("%d", callback.From.ID)
-		user := prefs.GetUser(callbackChatID)
-		for _, evt := range stateEvents {
-			user.MarkEventSeen(evt.ID)
-		}
-		*modified = true
-
-		// Send the requested events
-		if len(eventsToSend) > 0 && !dryRun {
-			client, err := telegram.NewClient(botToken, callbackChatID)
-			if err != nil {
-				responseText = fmt.Sprintf("❌ Error sending events: %v", err)
-				break
-			}
-
-			for i, evt := range eventsToSend {
-				msg, keyboard := telegram.FormatEventWithCalendar(evt)
-				if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
-					fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
-				}
-
-				// Rate limiting
-				if i < len(eventsToSend)-1 {
-					time.Sleep(1 * time.Second)
-				}
-			}
-
-			responseText = fmt.Sprintf("✅ Sent %d event(s)! All events marked as seen.", len(eventsToSend))
-		} else if len(eventsToSend) > 0 {
-			responseText = fmt.Sprintf("[DRY RUN] Would send %d event(s)", len(eventsToSend))
-		}
+		responseText = handlePreviewCallback(prefs, callback, modified, botToken, dryRun)
 
 	case "calendar":
 		// Calendar download - fetch event and send .ics file

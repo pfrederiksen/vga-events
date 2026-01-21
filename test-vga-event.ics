@@ -1,0 +1,19 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//VGA Events//vga-events//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:test-event-123@vgagolf.org
+DTSTAMP:20260121T003028Z
+DTSTART:20260315T090000Z
+DTEND:20260315T130000Z
+SUMMARY:VGA Golf - Spring Championship at TPC Las Vegas
+DESCRIPTION:Date: Mar 15 2026\nNV - Spring Championship at TPC Las Vegas\n\nRegister at: https://vgagolf.org/state-events
+LOCATION:Spring Championship at TPC Las Vegas\, Las Vegas
+URL:https://vgagolf.org/state-events
+STATUS:CONFIRMED
+SEQUENCE:0
+TRANSP:OPAQUE
+END:VEVENT
+END:VCALENDAR
