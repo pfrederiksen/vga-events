@@ -34,3 +34,7 @@ Thumbs.db
 # Test data (keep fixtures)
 testdata/*.json
 !testdata/fixtures/
+
+# Local planning documents
+ENHANCEMENTS.md
+TODO.md
