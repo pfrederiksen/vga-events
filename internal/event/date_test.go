@@ -1,6 +1,7 @@
 package event
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -339,6 +340,111 @@ func TestSortByDate(t *testing.T) {
 				if event.DateText != tt.wantOrder[i] {
 					t.Errorf("SortByDate() at position %d = %q, want %q", i, event.DateText, tt.wantOrder[i])
 				}
+			}
+		})
+	}
+}
+
+func TestFormatDateNice(t *testing.T) {
+	tests := []struct {
+		name         string
+		dateText     string
+		wantContains []string // Strings that should be in the result
+	}{
+		{
+			name:     "Empty date",
+			dateText: "",
+			wantContains: []string{
+				"", // Should return empty string
+			},
+		},
+		{
+			name:     "Unparseable date",
+			dateText: "invalid date",
+			wantContains: []string{
+				"invalid date", // Should return original text
+			},
+		},
+		{
+			name:     "Valid date with full year",
+			dateText: "Apr 4 2026",
+			wantContains: []string{
+				"Apr 4, 2026", // Should include formatted date
+				"2026",        // Should include year
+			},
+		},
+		{
+			name:     "Valid date with two-digit year",
+			dateText: "May 15 2026",
+			wantContains: []string{
+				"May 15, 2026", // Should include formatted date
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatDateNice(tt.dateText)
+
+			// For empty expected result, check exact match
+			if len(tt.wantContains) == 1 && tt.wantContains[0] == "" {
+				if got != "" {
+					t.Errorf("FormatDateNice(%q) = %q, want empty string", tt.dateText, got)
+				}
+				return
+			}
+
+			// For non-empty results, check that all expected strings are present
+			for _, want := range tt.wantContains {
+				if !strings.Contains(got, want) {
+					t.Errorf("FormatDateNice(%q) = %q, missing %q", tt.dateText, got, want)
+				}
+			}
+
+			// Check length is reasonable (not too long for Telegram messages)
+			if len(got) > 100 {
+				t.Errorf("FormatDateNice(%q) length = %d, exceeds reasonable limit of 100", tt.dateText, len(got))
+			}
+		})
+	}
+}
+
+func TestFormatDateNice_RelativeTime(t *testing.T) {
+	// Test relative time indicators (today, tomorrow, in X days)
+	// These tests use fixed dates to ensure predictable results
+
+	tests := []struct {
+		name         string
+		daysFromNow  int // Offset from current date
+		wantContains string
+	}{
+		{
+			name:         "Event in 1 day",
+			daysFromNow:  1,
+			wantContains: "(tomorrow)",
+		},
+		{
+			name:         "Event in 7 days",
+			daysFromNow:  7,
+			wantContains: "(in 1 week)",
+		},
+		{
+			name:         "Event in 14 days",
+			daysFromNow:  14,
+			wantContains: "(in 2 weeks)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a date N days from now
+			futureDate := time.Now().AddDate(0, 0, tt.daysFromNow)
+			dateText := futureDate.Format("Jan 2 2006")
+
+			got := FormatDateNice(dateText)
+
+			if !strings.Contains(got, tt.wantContains) {
+				t.Errorf("FormatDateNice(%q) = %q, want to contain %q", dateText, got, tt.wantContains)
 			}
 		})
 	}

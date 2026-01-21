@@ -338,3 +338,143 @@ func TestFormatEventWithStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatReminder(t *testing.T) {
+	tests := []struct {
+		name         string
+		event        *event.Event
+		daysUntil    int
+		wantContains []string
+	}{
+		{
+			name: "Reminder 1 day before",
+			event: &event.Event{
+				ID:       "test123",
+				State:    "NV",
+				Title:    "Chimera Golf Club",
+				DateText: "Apr 4 2026",
+				City:     "Las Vegas",
+			},
+			daysUntil: 1,
+			wantContains: []string{
+				"⏰",
+				"Event Reminder",
+				"Tomorrow",
+				"NV",
+				"Chimera Golf Club",
+				"Las Vegas",
+				"vgagolf.org/state-events",
+				"#Reminder",
+			},
+		},
+		{
+			name: "Reminder 7 days before",
+			event: &event.Event{
+				ID:       "test456",
+				State:    "CA",
+				Title:    "Pebble Beach",
+				DateText: "May 15 2026",
+				City:     "Monterey",
+			},
+			daysUntil: 7,
+			wantContains: []string{
+				"⏰",
+				"Event Reminder",
+				"In 1 week",
+				"CA",
+				"Pebble Beach",
+				"Monterey",
+			},
+		},
+		{
+			name: "Reminder 14 days before",
+			event: &event.Event{
+				ID:       "test789",
+				State:    "TX",
+				Title:    "Dallas Country Club",
+				DateText: "Jun 1 2026",
+				City:     "",
+			},
+			daysUntil: 14,
+			wantContains: []string{
+				"In 2 weeks",
+				"TX",
+				"Dallas Country Club",
+			},
+		},
+		{
+			name: "Reminder 3 days before",
+			event: &event.Event{
+				ID:       "test101",
+				State:    "AZ",
+				Title:    "Phoenix Golf Resort",
+				DateText: "Jul 10 2026",
+			},
+			daysUntil: 3,
+			wantContains: []string{
+				"In 3 days",
+				"AZ",
+				"Phoenix Golf Resort",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, keyboard := FormatReminder(tt.event, tt.daysUntil)
+
+			// Check that message is not empty
+			if msg == "" {
+				t.Error("FormatReminder() returned empty string")
+			}
+
+			// Check that message is within Telegram's limit
+			if len(msg) > 4096 {
+				t.Errorf("FormatReminder() length = %d, exceeds Telegram limit of 4096", len(msg))
+			}
+
+			// Check contains
+			for _, want := range tt.wantContains {
+				if !strings.Contains(msg, want) {
+					t.Errorf("FormatReminder() missing %q in message:\n%s", want, msg)
+				}
+			}
+
+			// Check keyboard structure
+			if keyboard == nil {
+				t.Error("FormatReminder() returned nil keyboard")
+				return
+			}
+
+			// Should have 3 rows of buttons
+			if len(keyboard.InlineKeyboard) != 3 {
+				t.Errorf("Keyboard has %d rows, want 3", len(keyboard.InlineKeyboard))
+			}
+
+			// First row: Calendar button
+			if len(keyboard.InlineKeyboard) > 0 {
+				if len(keyboard.InlineKeyboard[0]) != 1 {
+					t.Errorf("First row has %d buttons, want 1", len(keyboard.InlineKeyboard[0]))
+				}
+				calButton := keyboard.InlineKeyboard[0][0]
+				if !strings.Contains(calButton.Text, "Calendar") {
+					t.Errorf("Calendar button text = %q, want to contain 'Calendar'", calButton.Text)
+				}
+			}
+
+			// Second row: Interested and Registered buttons
+			if len(keyboard.InlineKeyboard) > 1 {
+				if len(keyboard.InlineKeyboard[1]) != 2 {
+					t.Errorf("Second row has %d buttons, want 2", len(keyboard.InlineKeyboard[1]))
+				}
+			}
+
+			// Third row: Maybe and Skip buttons
+			if len(keyboard.InlineKeyboard) > 2 {
+				if len(keyboard.InlineKeyboard[2]) != 2 {
+					t.Errorf("Third row has %d buttons, want 2", len(keyboard.InlineKeyboard[2]))
+				}
+			}
+		})
+	}
+}

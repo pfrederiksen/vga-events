@@ -268,3 +268,109 @@ func TestGenerateICS_EventTimes(t *testing.T) {
 		t.Error("Event should end at 1 PM UTC (4 hours duration)")
 	}
 }
+
+func TestGenerateMultiEventICS(t *testing.T) {
+	events := []*event.Event{
+		{
+			ID:       "event1",
+			State:    "NV",
+			Title:    "Chimera Golf Club",
+			DateText: "Apr 4 2026",
+			City:     "Las Vegas",
+		},
+		{
+			ID:       "event2",
+			State:    "CA",
+			Title:    "Pebble Beach",
+			DateText: "May 15 2026",
+			City:     "Monterey",
+		},
+		{
+			ID:       "event3",
+			State:    "TX",
+			Title:    "Dallas Country Club",
+			DateText: "Jun 1 2026",
+			City:     "",
+		},
+	}
+
+	ics := GenerateMultiEventICS(events)
+
+	// Should contain calendar header
+	if !strings.Contains(ics, "BEGIN:VCALENDAR") {
+		t.Error("ICS should contain BEGIN:VCALENDAR")
+	}
+
+	if !strings.Contains(ics, "END:VCALENDAR") {
+		t.Error("ICS should contain END:VCALENDAR")
+	}
+
+	// Should use default calendar name
+	if !strings.Contains(ics, "VGA Registered Events") {
+		t.Error("ICS should contain default calendar name 'VGA Registered Events'")
+	}
+
+	// Should contain all three events
+	eventCount := strings.Count(ics, "BEGIN:VEVENT")
+	if eventCount != 3 {
+		t.Errorf("ICS contains %d events, want 3", eventCount)
+	}
+
+	// Check each event is present
+	if !strings.Contains(ics, "UID:event1@vgagolf.org") {
+		t.Error("ICS should contain event1")
+	}
+	if !strings.Contains(ics, "UID:event2@vgagolf.org") {
+		t.Error("ICS should contain event2")
+	}
+	if !strings.Contains(ics, "UID:event3@vgagolf.org") {
+		t.Error("ICS should contain event3")
+	}
+
+	// Check event details
+	if !strings.Contains(ics, "Chimera Golf Club") {
+		t.Error("ICS should contain first event title")
+	}
+	if !strings.Contains(ics, "Pebble Beach") {
+		t.Error("ICS should contain second event title")
+	}
+	if !strings.Contains(ics, "Dallas Country Club") {
+		t.Error("ICS should contain third event title")
+	}
+}
+
+func TestGenerateMultiEventICS_EmptyEvents(t *testing.T) {
+	ics := GenerateMultiEventICS([]*event.Event{})
+
+	// Should return empty string for no events
+	if ics != "" {
+		t.Errorf("GenerateMultiEventICS([]) = %q, want empty string", ics)
+	}
+}
+
+func TestGenerateBulkICS_WithCustomName(t *testing.T) {
+	events := []*event.Event{
+		{
+			ID:       "event1",
+			State:    "NV",
+			Title:    "Test Event",
+			DateText: "Apr 4 2026",
+		},
+	}
+
+	ics := GenerateBulkICS(events, "My Custom Calendar")
+
+	// Should contain custom calendar name
+	if !strings.Contains(ics, "My Custom Calendar") {
+		t.Error("ICS should contain custom calendar name 'My Custom Calendar'")
+	}
+
+	// Should still be valid ICS format
+	if !strings.Contains(ics, "BEGIN:VCALENDAR") {
+		t.Error("ICS should contain BEGIN:VCALENDAR")
+	}
+
+	if !strings.Contains(ics, "END:VCALENDAR") {
+		t.Error("ICS should contain END:VCALENDAR")
+	}
+}

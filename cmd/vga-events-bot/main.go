@@ -532,6 +532,8 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 	case "menu":
 		// Handle menu actions
 		switch param {
+		case "main":
+			responseText, keyboard = showMenuKeyboard()
 		case "all-events":
 			responseText, _ = handleAllEvents(prefs, chatID, botToken, dryRun)
 		case "my-events":
