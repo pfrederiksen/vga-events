@@ -10,9 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pfrederiksen/vga-events/internal/calendar"
 	"github.com/pfrederiksen/vga-events/internal/event"
 	"github.com/pfrederiksen/vga-events/internal/preferences"
 	"github.com/pfrederiksen/vga-events/internal/scraper"
+	"github.com/pfrederiksen/vga-events/internal/storage"
 	"github.com/pfrederiksen/vga-events/internal/telegram"
 )
 
@@ -301,7 +303,7 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 	switch action {
 	case "subscribe":
 		if param != "" {
-			responseText, _ = handleSubscribe(prefs, chatID, param, modified, dryRun)
+			responseText, _ = handleSubscribe(prefs, chatID, param, modified, botToken, dryRun)
 		} else {
 			// Show state selection keyboard
 			responseText, keyboard = showStateSelectionKeyboard()
@@ -326,10 +328,132 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 			}
 		}
 
+	case "preview":
+		// Handle event preview request after subscription
+		// Format: preview:STATE:COUNT (e.g., "preview:NV:5" or "preview:CA:all")
+		parts := strings.Split(callback.Data, ":")
+		if len(parts) != 3 {
+			responseText = "❌ Invalid preview request"
+			break
+		}
+
+		state := parts[1]
+		countStr := parts[2]
+
+		// Fetch current events for this state
+		sc := scraper.New()
+		allEvents, err := sc.FetchEvents()
+		if err != nil {
+			responseText = "❌ Error fetching events"
+			fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
+			break
+		}
+
+		// Filter events by state and sort by date (soonest first)
+		var stateEvents []*event.Event
+		for _, evt := range allEvents {
+			if state == "ALL" || strings.EqualFold(evt.State, state) {
+				stateEvents = append(stateEvents, evt)
+			}
+		}
+
+		// Sort by date (soonest first)
+		event.SortByDate(stateEvents)
+
+		// Determine how many to send
+		var eventsToSend []*event.Event
+		if countStr == "0" {
+			// User chose not to see events
+			responseText = "✅ Got it! You'll only be notified about new events going forward."
+		} else if countStr == "all" {
+			eventsToSend = stateEvents
+		} else {
+			count := 0
+			fmt.Sscanf(countStr, "%d", &count)
+			if count > 0 && count < len(stateEvents) {
+				eventsToSend = stateEvents[:count]
+			} else {
+				eventsToSend = stateEvents
+			}
+		}
+
+		// Mark ALL state events as seen (not just the ones we're sending)
+		callbackChatID := fmt.Sprintf("%d", callback.From.ID)
+		user := prefs.GetUser(callbackChatID)
+		for _, evt := range stateEvents {
+			user.MarkEventSeen(evt.ID)
+		}
+		*modified = true
+
+		// Send the requested events
+		if len(eventsToSend) > 0 && !dryRun {
+			client, err := telegram.NewClient(botToken, callbackChatID)
+			if err != nil {
+				responseText = fmt.Sprintf("❌ Error sending events: %v", err)
+				break
+			}
+
+			for i, evt := range eventsToSend {
+				msg, keyboard := telegram.FormatEventWithCalendar(evt)
+				if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
+					fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
+				}
+
+				// Rate limiting
+				if i < len(eventsToSend)-1 {
+					time.Sleep(1 * time.Second)
+				}
+			}
+
+			responseText = fmt.Sprintf("✅ Sent %d event(s)! All events marked as seen.", len(eventsToSend))
+		} else if len(eventsToSend) > 0 {
+			responseText = fmt.Sprintf("[DRY RUN] Would send %d event(s)", len(eventsToSend))
+		}
+
 	case "calendar":
-		// Calendar download is handled differently - we need to fetch the event
-		// and send an .ics file. For now, inform user that feature is coming soon.
-		responseText = "📅 Calendar integration coming soon!\n\nFor now, please add events manually to your calendar."
+		// Calendar download - fetch event and send .ics file
+		eventID := param
+
+		// Initialize storage to retrieve the event
+		stor, err := storage.New(".snapshots")
+		if err != nil {
+			responseText = "❌ Error accessing event data"
+			fmt.Fprintf(os.Stderr, "Error initializing storage: %v\n", err)
+			break
+		}
+
+		// Get the event by ID
+		evt, err := stor.GetEventByID(eventID)
+		if err != nil {
+			responseText = "❌ Event not found. This event may have been removed."
+			fmt.Fprintf(os.Stderr, "Error retrieving event %s: %v\n", eventID, err)
+			break
+		}
+
+		// Generate .ics file
+		icsContent := calendar.GenerateICS(evt)
+		filename := fmt.Sprintf("vga-event-%s.ics", evt.State)
+
+		// Send the .ics file
+		if !dryRun {
+			client, err := telegram.NewClient(botToken, chatID)
+			if err != nil {
+				responseText = "❌ Error sending calendar file"
+				fmt.Fprintf(os.Stderr, "Error creating Telegram client: %v\n", err)
+				break
+			}
+
+			caption := fmt.Sprintf("📅 <b>%s - %s</b>\n\nTap to add to your calendar!", evt.State, evt.Title)
+			if err := client.SendDocument(filename, []byte(icsContent), caption); err != nil {
+				responseText = "❌ Error sending calendar file"
+				fmt.Fprintf(os.Stderr, "Error sending document: %v\n", err)
+				break
+			}
+
+			responseText = "✅ Calendar file sent! Tap it to add the event to your calendar."
+		} else {
+			responseText = fmt.Sprintf("[DRY RUN] Would send .ics file for event: %s - %s", evt.State, evt.Title)
+		}
 
 	default:
 		responseText = "Unknown action"
@@ -383,7 +507,7 @@ func processCommand(prefs preferences.Preferences, chatID, text string, modified
 			// Show state selection keyboard
 			return handleSubscribeWithKeyboard(chatID, botToken, dryRun)
 		}
-		return handleSubscribe(prefs, chatID, parts[1], modified, dryRun)
+		return handleSubscribe(prefs, chatID, parts[1], modified, botToken, dryRun)
 
 	case "/unsubscribe":
 		if len(parts) < 2 {
@@ -437,7 +561,7 @@ Change your preferences with /settings
 Checks run every hour.`
 }
 
-func handleSubscribe(prefs preferences.Preferences, chatID, state string, modified *bool, dryRun bool) (string, []*event.Event) {
+func handleSubscribe(prefs preferences.Preferences, chatID, state string, modified *bool, botToken string, dryRun bool) (string, []*event.Event) {
 	state = strings.ToUpper(strings.TrimSpace(state))
 
 	if !preferences.IsValidState(state) {
@@ -459,39 +583,53 @@ func handleSubscribe(prefs preferences.Preferences, chatID, state string, modifi
 	response += "You'll receive notifications when new events are posted.\n\n"
 	response += fmt.Sprintf("<b>Your subscriptions:</b> %s\n\n", strings.Join(states, ", "))
 
-	// Fetch current events for this state to send as initial sync
-	var initialEvents []*event.Event
+	// Check if there are existing events for this state
 	if !dryRun {
-		fmt.Printf("Fetching initial events for state %s...\n", state)
+		fmt.Printf("Checking for existing events in state %s...\n", state)
 		sc := scraper.New()
 		allEvents, err := sc.FetchEvents()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to fetch initial events: %v\n", err)
-			response += "⚠️ Unable to fetch current events, but you're subscribed!"
-		} else {
-			// Filter events by the subscribed state
-			for _, evt := range allEvents {
-				if state == "ALL" || strings.EqualFold(evt.State, state) {
-					initialEvents = append(initialEvents, evt)
-				}
-			}
+			fmt.Fprintf(os.Stderr, "Warning: Failed to fetch events: %v\n", err)
+			response += "⚠️ Unable to check for existing events, but you're subscribed!"
+			return response, nil
+		}
 
-			if len(initialEvents) > 0 {
-				// Limit to 10 initial events
-				totalEvents := len(initialEvents)
-				if totalEvents > 10 {
-					initialEvents = initialEvents[:10]
-					response += fmt.Sprintf("📨 Sending you the first 10 of %d current events...", totalEvents)
-				} else {
-					response += fmt.Sprintf("📨 Sending you %d current event(s)...", totalEvents)
-				}
-			} else {
-				response += "ℹ️ No current events found for this state."
+		// Filter and count events by state
+		var stateEvents []*event.Event
+		for _, evt := range allEvents {
+			if state == "ALL" || strings.EqualFold(evt.State, state) {
+				stateEvents = append(stateEvents, evt)
 			}
 		}
+
+		totalEvents := len(stateEvents)
+		if totalEvents == 0 {
+			response += "ℹ️ No current events found for this state. You'll be notified when new events are posted!"
+			return response, nil
+		}
+
+		// Ask user how many events they want to see with inline keyboard
+		response += fmt.Sprintf("📅 There are currently <b>%d event(s)</b> scheduled in %s.\n\n", totalEvents, stateName)
+		response += "Would you like to see existing events, or just be notified about new ones?"
+
+		// Build keyboard with preview options
+		keyboard := buildEventPreviewKeyboard(state, totalEvents)
+
+		// Send keyboard message
+		client, err := telegram.NewClient(botToken, chatID)
+		if err == nil {
+			if err := client.SendMessageWithKeyboard(response, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending preview keyboard: %v\n", err)
+				return response, nil // Fallback to plain message
+			}
+			return "", nil // Already sent via keyboard
+		}
+
+		// If we couldn't send keyboard, just return the message
+		return response, nil
 	}
 
-	return response, initialEvents
+	return response, nil
 }
 
 func handleUnsubscribe(prefs preferences.Preferences, chatID, state string, modified *bool) string {
@@ -548,6 +686,40 @@ The bot checks for new events every hour automatically.
 If you're subscribed to any states, you'll receive notifications when new events are posted.
 
 Use /list to see your current subscriptions.`
+}
+
+// buildEventPreviewKeyboard returns a keyboard asking how many events to preview
+func buildEventPreviewKeyboard(state string, totalEvents int) *telegram.InlineKeyboardMarkup {
+	buttons := [][]telegram.InlineKeyboardButton{
+		{
+			{Text: "Don't show events", CallbackData: fmt.Sprintf("preview:%s:0", state)},
+		},
+	}
+
+	// Offer to show different amounts based on total
+	if totalEvents >= 5 {
+		buttons = append(buttons, []telegram.InlineKeyboardButton{
+			{Text: "Show 5 soonest events", CallbackData: fmt.Sprintf("preview:%s:5", state)},
+		})
+	}
+	if totalEvents >= 10 {
+		buttons = append(buttons, []telegram.InlineKeyboardButton{
+			{Text: "Show 10 soonest events", CallbackData: fmt.Sprintf("preview:%s:10", state)},
+		})
+	}
+	if totalEvents > 10 {
+		buttons = append(buttons, []telegram.InlineKeyboardButton{
+			{Text: fmt.Sprintf("Show all %d events", totalEvents), CallbackData: fmt.Sprintf("preview:%s:all", state)},
+		})
+	} else {
+		buttons = append(buttons, []telegram.InlineKeyboardButton{
+			{Text: fmt.Sprintf("Show all %d events", totalEvents), CallbackData: fmt.Sprintf("preview:%s:all", state)},
+		})
+	}
+
+	return &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: buttons,
+	}
 }
 
 // showStateSelectionKeyboard returns a keyboard with popular states
