@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/pfrederiksen/vga-events/internal/course"
 )
 
 // Snapshot represents a collection of events at a point in time
@@ -11,6 +13,7 @@ type Snapshot struct {
 	Events      map[string]*Event      `json:"events"`       // keyed by Event.ID
 	StableIndex map[string]string      `json:"stable_index"` // StableKey → ID mapping
 	ChangeLog   []*EventChange         `json:"change_log"`   // Recent changes
+	CourseCache *course.CourseCache    `json:"course_cache"` // Cached course information
 	UpdatedAt   string                 `json:"updated_at"`   // RFC3339 timestamp
 }
 
@@ -20,6 +23,7 @@ func NewSnapshot() *Snapshot {
 		Events:      make(map[string]*Event),
 		StableIndex: make(map[string]string),
 		ChangeLog:   make([]*EventChange, 0),
+		CourseCache: course.NewCourseCache(),
 	}
 }
 

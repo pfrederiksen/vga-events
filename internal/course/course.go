@@ -18,20 +18,56 @@ type CourseInfo struct {
 	Source  string  // Data source: "manual" or "ghin"
 }
 
+// globalCache is the shared course cache instance
+var globalCache *CourseCache
+
+// globalGHINClient is the shared GHIN API client
+var globalGHINClient *GHINClient
+
+// init initializes global cache and GHIN client
+func init() {
+	globalCache = NewCourseCache()
+	globalGHINClient = NewGHINClient()
+}
+
 // LookupCourse attempts to find course information by title and state
+// Uses three-tier lookup: manual DB → cache → GHIN API
 // Returns nil if no information is available
 func LookupCourse(title, state string) *CourseInfo {
-	// Try manual database first (fast lookup)
+	return LookupCourseWithCache(title, state, globalCache, globalGHINClient)
+}
+
+// LookupCourseWithCache performs course lookup with explicit cache and client
+// Useful for testing and custom configurations
+func LookupCourseWithCache(title, state string, cache *CourseCache, ghinClient *GHINClient) *CourseInfo {
+	// 1. Try manual database first (instant, no API call)
 	if info := lookupManual(title, state); info != nil {
 		return info
 	}
 
-	// Future: Try GHIN API if manual lookup fails
-	// if info := lookupGHIN(title, state); info != nil {
-	//     return info
-	// }
+	// 2. Try cache (fast, no API call)
+	if cache != nil {
+		if info := cache.Get(title, state); info != nil {
+			return info
+		}
+	}
 
-	// No information available
+	// 3. Try GHIN API (slow, requires network)
+	if ghinClient != nil {
+		info, err := ghinClient.SearchCourse(title, state)
+		if err != nil {
+			// Log error but don't fail - graceful degradation
+			// In production, could log: fmt.Fprintf(os.Stderr, "GHIN API error: %v\n", err)
+		} else if info != nil {
+			// Cache successful lookup
+			if cache != nil {
+				cache.Set(title, state, info)
+			}
+			return info
+		}
+	}
+
+	// No information available from any source
 	return nil
 }
 
