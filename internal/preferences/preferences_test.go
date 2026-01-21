@@ -68,6 +68,7 @@ func TestPreferences(t *testing.T) {
 	}
 }
 
+//nolint:dupl // Similar structure to TestIsValidEventStatus is intentional
 func TestIsValidState(t *testing.T) {
 	tests := []struct {
 		state string
