@@ -53,6 +53,52 @@ func FormatEventWithCalendar(evt *event.Event) (string, *InlineKeyboardMarkup) {
 	return text, keyboard
 }
 
+// FormatEventWithStatus formats an event message with status and calendar buttons
+func FormatEventWithStatus(evt *event.Event, currentStatus string) (string, *InlineKeyboardMarkup) {
+	text := FormatEvent(evt)
+
+	// Add current status indicator to text if status is set
+	if currentStatus != "" {
+		statusEmoji := ""
+		statusText := ""
+		switch currentStatus {
+		case "interested":
+			statusEmoji = "⭐"
+			statusText = "Interested"
+		case "registered":
+			statusEmoji = "✅"
+			statusText = "Registered"
+		case "maybe":
+			statusEmoji = "🤔"
+			statusText = "Maybe"
+		case "skip":
+			statusEmoji = "❌"
+			statusText = "Skipped"
+		}
+		if statusEmoji != "" {
+			text = fmt.Sprintf("%s %s <b>%s</b>\n\n%s", statusEmoji, statusEmoji, statusText, text)
+		}
+	}
+
+	keyboard := &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "📅 Calendar", CallbackData: fmt.Sprintf("calendar:%s", evt.ID)},
+			},
+			{
+				{Text: "⭐ Interested", CallbackData: fmt.Sprintf("status:%s:interested", evt.ID)},
+				{Text: "✅ Registered", CallbackData: fmt.Sprintf("status:%s:registered", evt.ID)},
+			},
+			{
+				{Text: "🤔 Maybe", CallbackData: fmt.Sprintf("status:%s:maybe", evt.ID)},
+				{Text: "❌ Skip", CallbackData: fmt.Sprintf("status:%s:skip", evt.ID)},
+			},
+		},
+	}
+
+	return text, keyboard
+}
+
 // FormatSummary creates a summary message for multiple events
 func FormatSummary(count int, states []string) string {
 	var msg strings.Builder
