@@ -22,7 +22,8 @@ const (
 	AllStatesCode = "ALL"
 
 	// Error messages
-	errFetchingEvents = "❌ Error fetching events. Please try again later."
+	errFetchingEvents      = "❌ Error fetching events. Please try again later."
+	errSendingCalendarFile = "❌ Error sending calendar file"
 )
 
 var (
@@ -692,14 +693,14 @@ Example:
 		if !dryRun {
 			client, err := telegram.NewClient(botToken, chatID)
 			if err != nil {
-				responseText = "❌ Error sending calendar file"
+				responseText = errSendingCalendarFile
 				fmt.Fprintf(os.Stderr, "Error creating Telegram client: %v\n", err)
 				break
 			}
 
 			caption := fmt.Sprintf("📅 <b>%s - %s</b>\n\nTap to add to your calendar!", evt.State, evt.Title)
 			if err := client.SendDocument(filename, []byte(icsContent), caption); err != nil {
-				responseText = "❌ Error sending calendar file"
+				responseText = errSendingCalendarFile
 				fmt.Fprintf(os.Stderr, "Error sending document: %v\n", err)
 				break
 			}
@@ -1178,7 +1179,7 @@ Try /export-calendar with a different state, or check back later.`, strings.Join
 	if !dryRun {
 		client, err := telegram.NewClient(botToken, chatID)
 		if err != nil {
-			return "❌ Error sending calendar file", nil
+			return errSendingCalendarFile, nil
 		}
 
 		filename := "vga-events.ics"
@@ -1194,7 +1195,7 @@ Tap the file to import all events into your calendar app!`, len(filteredEvents),
 
 		if err := client.SendDocument(filename, []byte(icsContent), caption); err != nil {
 			fmt.Fprintf(os.Stderr, "Error sending document: %v\n", err)
-			return "❌ Error sending calendar file", nil
+			return errSendingCalendarFile, nil
 		}
 
 		fmt.Printf("Sent bulk calendar file to %s (%d events)\n", chatID, len(filteredEvents))
@@ -1808,7 +1809,11 @@ func sendDigest(botToken, chatID, digestFile, digestType string) {
 		fmt.Fprintf(os.Stderr, "Error opening digest file: %v\n", err)
 		os.Exit(1)
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Error closing digest file: %v\n", closeErr)
+		}
+	}()
 
 	var result struct {
 		NewEvents []*event.Event `json:"new_events"`
@@ -1961,13 +1966,13 @@ func handleBulkCallback(prefs preferences.Preferences, chatID, action string, mo
 			client, err := telegram.NewClient(botToken, chatID)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error creating client: %v\n", err)
-				return "❌ Error sending calendar file", nil
+				return errSendingCalendarFile, nil
 			}
 
 			caption := fmt.Sprintf("📅 <b>Your Registered Events</b>\n\n%d event(s) ready to import to your calendar!", len(registeredEvents))
 			if err := client.SendDocument(filename, []byte(icsContent), caption); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending document: %v\n", err)
-				return "❌ Error sending calendar file", nil
+				return errSendingCalendarFile, nil
 			}
 
 			return fmt.Sprintf("✅ Calendar file sent with <b>%d</b> registered event(s)!", len(registeredEvents)), nil
