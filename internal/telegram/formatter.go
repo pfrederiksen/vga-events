@@ -101,7 +101,7 @@ func FormatEventWithStatusAndNote(evt *event.Event, currentStatus, note, chatID 
 		if len(friendIDs) > 0 {
 			friendText := ""
 			if len(friendIDs) == 1 {
-				friendText = fmt.Sprintf("\n👥 <b>1 friend</b> registered for this event\n")
+				friendText = "\n👥 <b>1 friend</b> registered for this event\n"
 			} else {
 				friendText = fmt.Sprintf("\n👥 <b>%d friends</b> registered for this event\n", len(friendIDs))
 			}

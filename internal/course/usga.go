@@ -45,16 +45,16 @@ type USGASearchResponse struct {
 
 // USGACourseDetails represents detailed course information
 type USGACourseDetails struct {
-	CourseName string     `json:"courseName"`
-	City       string     `json:"city"`
-	State      string     `json:"state"`
-	Tees       []USGATee  `json:"tees"`
+	CourseName string    `json:"courseName"`
+	City       string    `json:"city"`
+	State      string    `json:"state"`
+	Tees       []USGATee `json:"tees"`
 }
 
 // USGATee represents tee box information
 type USGATee struct {
-	TeeColor   string  `json:"teeColor"`
-	TeeName    string  `json:"teeName"`
+	TeeColor     string  `json:"teeColor"`
+	TeeName      string  `json:"teeName"`
 	CourseRating float64 `json:"courseRating"`
 	SlopeRating  int     `json:"slopeRating"`
 	Par          int     `json:"par"`
@@ -85,10 +85,10 @@ func (c *USGAClient) SearchCourse(name, state string) (*CourseInfo, error) {
 	if err != nil {
 		// If we can't get details, return basic info from search result
 		return &CourseInfo{
-			Name:    bestMatch.FacilityName + " - " + bestMatch.CourseName,
-			City:    bestMatch.City,
-			State:   bestMatch.State,
-			Source:  "usga",
+			Name:   bestMatch.FacilityName + " - " + bestMatch.CourseName,
+			City:   bestMatch.City,
+			State:  bestMatch.State,
+			Source: "usga",
 		}, nil
 	}
 
@@ -96,10 +96,10 @@ func (c *USGAClient) SearchCourse(name, state string) (*CourseInfo, error) {
 	tee := selectChampionshipTee(details.Tees)
 	if tee == nil {
 		return &CourseInfo{
-			Name:    details.CourseName,
-			City:    details.City,
-			State:   details.State,
-			Source:  "usga",
+			Name:   details.CourseName,
+			City:   details.City,
+			State:  details.State,
+			Source: "usga",
 		}, nil
 	}
 

@@ -59,15 +59,15 @@ type UserPreferences struct {
 	NotifyOnChanges bool `json:"notify_on_changes,omitempty"` // Default: true
 
 	// Weekly statistics (v0.5.0 Enhancement #4)
-	WeeklyStats  *WeeklyStats              `json:"weekly_stats,omitempty"`
-	StatsHistory map[string]*WeeklyStats   `json:"stats_history,omitempty"` // week key → stats
-	EnableStats  bool                      `json:"enable_stats,omitempty"`  // Default: true
+	WeeklyStats  *WeeklyStats            `json:"weekly_stats,omitempty"`
+	StatsHistory map[string]*WeeklyStats `json:"stats_history,omitempty"` // week key → stats
+	EnableStats  bool                    `json:"enable_stats,omitempty"`  // Default: true
 
 	// Friends and sharing (v0.5.0 Enhancement #7)
-	FriendChatIDs      []string          `json:"friend_chat_ids,omitempty"`       // List of friend chat IDs
-	PendingInvites     map[string]string `json:"pending_invites,omitempty"`       // invite code → sender chat ID
-	ShareEvents        bool              `json:"share_events,omitempty"`          // Default: false (privacy)
-	InviteCode         string            `json:"invite_code,omitempty"`           // This user's invite code
+	FriendChatIDs      []string            `json:"friend_chat_ids,omitempty"`     // List of friend chat IDs
+	PendingInvites     map[string]string   `json:"pending_invites,omitempty"`     // invite code → sender chat ID
+	ShareEvents        bool                `json:"share_events,omitempty"`        // Default: false (privacy)
+	InviteCode         string              `json:"invite_code,omitempty"`         // This user's invite code
 	GroupSubscriptions map[string][]string `json:"group_subscriptions,omitempty"` // group ID → member chat IDs
 }
 
@@ -175,13 +175,13 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		EventStatuses:      make(map[string]string),
 		ReminderDays:       []int{}, // No reminders by default, user can configure
 		EventNotes:         make(map[string]string),
-		NotifyOnChanges:    true,              // New feature: notify about event changes
-		WeeklyStats:        NewWeeklyStats(),  // New feature: track weekly stats
+		NotifyOnChanges:    true,             // New feature: notify about event changes
+		WeeklyStats:        NewWeeklyStats(), // New feature: track weekly stats
 		StatsHistory:       make(map[string]*WeeklyStats),
-		EnableStats:        true,              // Enable stats tracking by default
-		FriendChatIDs:      []string{},        // New feature: friends list
+		EnableStats:        true,       // Enable stats tracking by default
+		FriendChatIDs:      []string{}, // New feature: friends list
 		PendingInvites:     make(map[string]string),
-		ShareEvents:        false,             // Privacy: opt-in only
+		ShareEvents:        false, // Privacy: opt-in only
 		InviteCode:         generateInviteCode(chatID),
 		GroupSubscriptions: make(map[string][]string),
 	}

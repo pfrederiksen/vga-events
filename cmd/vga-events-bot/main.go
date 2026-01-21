@@ -24,6 +24,7 @@ const (
 	// Error messages
 	errFetchingEvents      = "❌ Error fetching events. Please try again later."
 	errSendingCalendarFile = "❌ Error sending calendar file"
+	errUserNotFound        = "❌ Error: User not found"
 )
 
 var (
@@ -786,6 +787,7 @@ Example:
 	}
 }
 
+//nolint:gocyclo // Command dispatcher naturally has high complexity due to many cases
 func processCommand(prefs preferences.Preferences, chatID, text string, modified *bool, botToken string, dryRun bool) (string, []*event.Event) {
 	parts := strings.Fields(text)
 	if len(parts) == 0 {
@@ -1096,7 +1098,7 @@ func handleUnsubscribe(prefs preferences.Preferences, chatID, state string, modi
 func handleAddNote(prefs preferences.Preferences, chatID, eventID, noteText string, modified *bool) (string, []*event.Event) {
 	user := prefs.GetUser(chatID)
 	if user == nil {
-		return "❌ Error: User not found", nil
+		return errUserNotFound, nil
 	}
 
 	user.SetEventNote(eventID, noteText)
@@ -1109,7 +1111,7 @@ func handleAddNote(prefs preferences.Preferences, chatID, eventID, noteText stri
 func handleRemoveNote(prefs preferences.Preferences, chatID, eventID string, modified *bool) (string, []*event.Event) {
 	user := prefs.GetUser(chatID)
 	if user == nil {
-		return "❌ Error: User not found", nil
+		return errUserNotFound, nil
 	}
 
 	// Check if note exists
@@ -1127,7 +1129,7 @@ func handleRemoveNote(prefs preferences.Preferences, chatID, eventID string, mod
 func handleStats(prefs preferences.Preferences, chatID, period string) string {
 	user := prefs.GetUser(chatID)
 	if user == nil {
-		return "❌ Error: User not found"
+		return errUserNotFound
 	}
 
 	if !user.EnableStats {
@@ -1204,7 +1206,7 @@ func handleStats(prefs preferences.Preferences, chatID, period string) string {
 func handleInvite(prefs preferences.Preferences, chatID string) string {
 	user := prefs.GetUser(chatID)
 	if user == nil {
-		return "❌ Error: User not found"
+		return errUserNotFound
 	}
 
 	inviteCode := user.GetInviteCode()
@@ -1230,7 +1232,7 @@ Use /friends to see your current friends.`, inviteCode, inviteCode)
 func handleFriends(prefs preferences.Preferences, chatID string) string {
 	user := prefs.GetUser(chatID)
 	if user == nil {
-		return "❌ Error: User not found"
+		return errUserNotFound
 	}
 
 	if len(user.FriendChatIDs) == 0 {
@@ -1274,7 +1276,7 @@ You have <b>%d friend(s)</b>:
 func handleJoin(prefs preferences.Preferences, chatID, inviteCode string, modified *bool) string {
 	user := prefs.GetUser(chatID)
 	if user == nil {
-		return "❌ Error: User not found"
+		return errUserNotFound
 	}
 
 	// Check if trying to add themselves
@@ -1411,7 +1413,7 @@ func handleNear(prefs preferences.Preferences, chatID, cityName, botToken string
 func handleListNotes(prefs preferences.Preferences, chatID, botToken string, dryRun bool) (string, []*event.Event) {
 	user := prefs.GetUser(chatID)
 	if user == nil {
-		return "❌ Error: User not found", nil
+		return errUserNotFound, nil
 	}
 
 	if len(user.EventNotes) == 0 {
