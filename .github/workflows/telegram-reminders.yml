@@ -1,0 +1,173 @@
+name: Send Event Reminders
+
+on:
+  schedule:
+    # Run daily at 9 AM UTC
+    - cron: '0 9 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: read
+
+jobs:
+  send-reminders:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build tools
+        run: |
+          go build -o vga-events ./cmd/vga-events
+          go build -o vga-events-telegram ./cmd/vga-events-telegram
+
+      - name: Fetch current events
+        id: fetch
+        run: |
+          # Create snapshots directory
+          mkdir -p .snapshots
+
+          # Fetch all current events (no snapshot comparison needed)
+          ./vga-events --check-state all --format json --data-dir .snapshots --refresh > events.json
+
+          EVENT_COUNT=$(jq '.event_count' events.json)
+          echo "Found $EVENT_COUNT total events"
+          echo "event_count=$EVENT_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Load user preferences
+        if: steps.fetch.outputs.event_count != '0'
+        id: prefs
+        env:
+          TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
+          TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
+        run: |
+          # Fetch preferences from Gist
+          PREFS_JSON=$(curl -s -H "Authorization: token $TELEGRAM_GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/gists/$TELEGRAM_GIST_ID" | \
+            jq -r '.files["preferences.json"].content')
+
+          echo "$PREFS_JSON" > preferences.json
+
+          # Get list of active users with reminder_days configured
+          USERS=$(echo "$PREFS_JSON" | jq -r 'to_entries[] | select(.value.active == true and (.value.reminder_days | length) > 0) | .key')
+          echo "users<<EOF" >> $GITHUB_OUTPUT
+          echo "$USERS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          USER_COUNT=$(echo "$USERS" | wc -l | tr -d ' ')
+          echo "Found $USER_COUNT user(s) with reminders configured"
+
+      - name: Send reminders
+        if: steps.fetch.outputs.event_count != '0' && steps.prefs.outputs.users != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          # Get current date in seconds since epoch
+          CURRENT_DATE=$(date +%s)
+          CURRENT_DATE_NORMALIZED=$(date -d "@$CURRENT_DATE" +%Y-%m-%d)
+
+          echo "Current date: $CURRENT_DATE_NORMALIZED"
+          echo ""
+
+          # For each user with reminders configured
+          while IFS= read -r CHAT_ID; do
+            [ -z "$CHAT_ID" ] && continue
+
+            echo "Processing reminders for user $CHAT_ID..."
+
+            # Get user's reminder days (e.g., "1,3,7,14")
+            REMINDER_DAYS=$(jq -r --arg chat "$CHAT_ID" '.[$chat].reminder_days | join(",")' preferences.json)
+
+            if [ -z "$REMINDER_DAYS" ] || [ "$REMINDER_DAYS" = "null" ]; then
+              echo "  No reminder days configured, skipping"
+              continue
+            fi
+
+            echo "  Reminder days: $REMINDER_DAYS"
+
+            # Get user's event statuses (only interested and registered)
+            EVENT_IDS=$(jq -r --arg chat "$CHAT_ID" '.[$chat].event_statuses // {} | to_entries[] | select(.value == "interested" or .value == "registered") | .key' preferences.json)
+
+            if [ -z "$EVENT_IDS" ]; then
+              echo "  No tracked events (interested/registered), skipping"
+              continue
+            fi
+
+            EVENT_COUNT=$(echo "$EVENT_IDS" | wc -l | tr -d ' ')
+            echo "  Tracking $EVENT_COUNT event(s)"
+
+            # For each tracked event, check if reminder should be sent
+            REMINDERS_TO_SEND=0
+
+            while IFS= read -r EVENT_ID; do
+              [ -z "$EVENT_ID" ] && continue
+
+              # Find the event in events.json
+              EVENT_JSON=$(jq --arg id "$EVENT_ID" '.new_events[] | select(.id == $id)' events.json)
+
+              if [ -z "$EVENT_JSON" ]; then
+                # Event no longer exists
+                continue
+              fi
+
+              # Get event date
+              EVENT_DATE_TEXT=$(echo "$EVENT_JSON" | jq -r '.date_text')
+
+              # Try to parse the date (this will be done in the telegram tool)
+              # For now, we'll pass the event to the telegram tool and let it handle date parsing
+
+              # Get user's status for this event
+              EVENT_STATUS=$(jq -r --arg chat "$CHAT_ID" --arg id "$EVENT_ID" '.[$chat].event_statuses[$id]' preferences.json)
+
+              # Create a temporary file with just this event
+              echo "$EVENT_JSON" | jq -s '{checked_at: now | todate, new_events: ., event_count: 1}' > "reminder_${CHAT_ID}_${EVENT_ID}.json"
+
+              # Check if we should send reminder for this event
+              # The vga-events-telegram tool will handle date calculation and filtering
+              IFS=',' read -ra DAYS <<< "$REMINDER_DAYS"
+              for DAY in "${DAYS[@]}"; do
+                # Send reminder with reminder flag
+                if ./vga-events-telegram --chat-id "$CHAT_ID" \
+                   --events-file "reminder_${CHAT_ID}_${EVENT_ID}.json" \
+                   --reminder-days "$DAY" \
+                   --check-reminders 2>/dev/null; then
+                  REMINDERS_TO_SEND=$((REMINDERS_TO_SEND + 1))
+                  echo "    Sent ${DAY}-day reminder for event: $(echo "$EVENT_JSON" | jq -r '.title')"
+                  break  # Only send one reminder per event per day
+                fi
+              done
+
+              rm -f "reminder_${CHAT_ID}_${EVENT_ID}.json"
+
+            done <<< "$EVENT_IDS"
+
+            if [ $REMINDERS_TO_SEND -gt 0 ]; then
+              echo "  ✅ Sent $REMINDERS_TO_SEND reminder(s)"
+            else
+              echo "  No reminders needed today"
+            fi
+
+            echo ""
+
+          done <<< "${{ steps.prefs.outputs.users }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.fetch.outputs.event_count }}" == "0" ]; then
+            echo "ℹ️ No events found"
+          elif [ "${{ steps.prefs.outputs.users }}" == "" ]; then
+            echo "ℹ️ No users with reminders configured"
+          else
+            echo "✅ Processed reminders for configured users"
+          fi

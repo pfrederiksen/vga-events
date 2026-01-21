@@ -13,14 +13,16 @@ import (
 )
 
 var (
-	botToken    = flag.String("bot-token", os.Getenv("TELEGRAM_BOT_TOKEN"), "Telegram bot token (or env: TELEGRAM_BOT_TOKEN)")
-	chatID      = flag.String("chat-id", os.Getenv("TELEGRAM_CHAT_ID"), "Telegram chat ID (or env: TELEGRAM_CHAT_ID)")
-	eventsFile  = flag.String("events-file", "", "Path to events JSON file (or read from stdin)")
-	dryRun      = flag.Bool("dry-run", false, "Print messages without sending")
-	maxMessages = flag.Int("max-messages", 10, "Maximum number of messages to send")
-	stateFilter = flag.String("state", "", "Only send messages for this state")
-	hidePast    = flag.Bool("hide-past", true, "Filter out past events (default: true)")
-	daysAhead   = flag.Int("days-ahead", 0, "Only show events within N days (0 = disabled)")
+	botToken      = flag.String("bot-token", os.Getenv("TELEGRAM_BOT_TOKEN"), "Telegram bot token (or env: TELEGRAM_BOT_TOKEN)")
+	chatID        = flag.String("chat-id", os.Getenv("TELEGRAM_CHAT_ID"), "Telegram chat ID (or env: TELEGRAM_CHAT_ID)")
+	eventsFile    = flag.String("events-file", "", "Path to events JSON file (or read from stdin)")
+	dryRun        = flag.Bool("dry-run", false, "Print messages without sending")
+	maxMessages   = flag.Int("max-messages", 10, "Maximum number of messages to send")
+	stateFilter   = flag.String("state", "", "Only send messages for this state")
+	hidePast      = flag.Bool("hide-past", true, "Filter out past events (default: true)")
+	daysAhead     = flag.Int("days-ahead", 0, "Only show events within N days (0 = disabled)")
+	checkReminders = flag.Bool("check-reminders", false, "Check if event matches reminder days (exits 0 if match, 1 if no match)")
+	reminderDays  = flag.Int("reminder-days", 0, "Number of days before event to send reminder (used with --check-reminders)")
 )
 
 func main() {
@@ -89,6 +91,40 @@ func main() {
 		events = filtered
 	}
 
+	// Check reminders mode: filter events that are exactly X days away
+	if *checkReminders {
+		if *reminderDays <= 0 {
+			fmt.Fprintf(os.Stderr, "Error: --reminder-days must be positive when using --check-reminders\n")
+			os.Exit(1)
+		}
+
+		filtered := make([]*event.Event, 0)
+		for _, evt := range events {
+			parsedDate := event.ParseDate(evt.DateText)
+			if parsedDate.IsZero() {
+				// Can't parse date, skip
+				continue
+			}
+
+			// Calculate days until event (at midnight)
+			now := time.Now()
+			today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+			eventDate := time.Date(parsedDate.Year(), parsedDate.Month(), parsedDate.Day(), 0, 0, 0, 0, now.Location())
+			daysUntil := int(eventDate.Sub(today).Hours() / 24)
+
+			if daysUntil == *reminderDays {
+				filtered = append(filtered, evt)
+			}
+		}
+		events = filtered
+
+		// If no events match, exit with code 1 (no reminder to send)
+		if len(events) == 0 {
+			os.Exit(1)
+		}
+		// Continue to send reminder for matching event(s)
+	}
+
 	// Limit number of messages
 	if len(events) > *maxMessages {
 		events = events[:*maxMessages]
@@ -131,7 +167,15 @@ func main() {
 
 	// Send messages with calendar buttons
 	for i, evt := range events {
-		msg, keyboard := telegram.FormatEventWithCalendar(evt)
+		var msg string
+		var keyboard *telegram.InlineKeyboardMarkup
+
+		// Use reminder format if in reminder mode
+		if *checkReminders {
+			msg, keyboard = telegram.FormatReminder(evt, *reminderDays)
+		} else {
+			msg, keyboard = telegram.FormatEventWithCalendar(evt)
+		}
 
 		if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 			fmt.Fprintf(os.Stderr, "Error sending message for event %s: %v\n", evt.ID, err)
@@ -144,5 +188,9 @@ func main() {
 		}
 	}
 
-	fmt.Printf("Successfully sent %d message(s)\n", len(events))
+	messageType := "message"
+	if *checkReminders {
+		messageType = "reminder"
+	}
+	fmt.Printf("Successfully sent %d %s(s)\n", len(events), messageType)
 }

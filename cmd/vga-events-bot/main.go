@@ -32,6 +32,10 @@ var (
 	dryRun       = flag.Bool("dry-run", false, "Show what would be done without making changes")
 	loop         = flag.Bool("loop", false, "Run continuously with long polling (for real-time responses)")
 	loopDuration = flag.Duration("loop-duration", 5*time.Hour+50*time.Minute, "Maximum duration for loop mode (default 5h50m)")
+	// Digest mode flags
+	digest     = flag.String("digest", "", "Send digest to specific chat ID (used by GitHub Actions)")
+	digestFile = flag.String("digest-file", "", "Path to digest events JSON file")
+	digestType = flag.String("digest-type", "daily", "Type of digest: daily or weekly")
 )
 
 type Update struct {
@@ -82,6 +86,16 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error initializing storage: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Digest mode: send digest and exit
+	if *digest != "" {
+		if *digestFile == "" {
+			fmt.Fprintf(os.Stderr, "Error: --digest-file is required when using --digest\n")
+			os.Exit(1)
+		}
+		sendDigest(*botToken, *digest, *digestFile, *digestType)
+		os.Exit(0)
 	}
 
 	// Load preferences
@@ -517,8 +531,14 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 	case "menu":
 		// Handle menu actions
 		switch param {
+		case "all-events":
+			responseText, _ = handleAllEvents(prefs, chatID, botToken, dryRun)
+		case "my-events":
+			responseText, _ = handleMyEvents(prefs, chatID, botToken, dryRun)
 		case "upcoming":
 			responseText = handleUpcomingEventsCallback(prefs, chatID, botToken, dryRun)
+		case "reminders":
+			responseText, keyboard = showRemindersKeyboard(prefs, chatID)
 		case "search":
 			responseText = `🔍 <b>Search Events</b>
 
@@ -689,6 +709,11 @@ Example:
 			responseText = fmt.Sprintf("[DRY RUN] Would send .ics file for event: %s - %s", evt.State, evt.Title)
 		}
 
+	case "bulk":
+		// Handle bulk actions
+		// Format: bulk:ACTION (e.g., "bulk:clear-skipped", "bulk:export-registered")
+		responseText, keyboard = handleBulkCallback(prefs, chatID, param, modified, botToken, dryRun)
+
 	default:
 		responseText = "Unknown action"
 	}
@@ -796,6 +821,9 @@ Please provide a search keyword.
 	case "/reminders":
 		return handleRemindersWithKeyboard(prefs, chatID, botToken, dryRun)
 
+	case "/bulk":
+		return handleBulkWithKeyboard(prefs, chatID, botToken, dryRun)
+
 	case "/check":
 		return handleCheck(chatID), nil
 
@@ -816,6 +844,7 @@ I help you track VGA Golf events in your favorite states!
 /events - View all events for your subscribed states 📅
 /my-events - View your tracked events ⭐
 /reminders - Configure event reminders 🔔
+/bulk - Bulk actions for multiple events 🔧
 /export-calendar - Download all events as .ics file 📅
 /subscribe - Choose states with buttons (or /subscribe NV)
 /manage - Manage your subscriptions with buttons
@@ -834,6 +863,11 @@ Mark events with status buttons:
 <b>Reminders:</b>
 Get reminded before events you've marked as ⭐ Interested or ✅ Registered.
 Configure reminder timing with /reminders (1 day, 3 days, 1 week, or 2 weeks before).
+
+<b>Bulk Actions:</b>
+Manage multiple events at once with /bulk:
+• Clear all skipped events
+• Export all registered events to calendar
 
 <b>State Codes:</b>
 Use 2-letter state codes like NV, CA, TX, etc.
@@ -1002,6 +1036,18 @@ func handleSearch(prefs preferences.Preferences, chatID, keyword string, botToke
 			strings.Contains(strings.ToLower(evt.State), keywordLower) {
 			matchingEvents = append(matchingEvents, evt)
 		}
+	}
+
+	// Apply past event filtering (default: hide past events)
+	user := prefs.GetUser(chatID)
+	if user.HidePastEvents {
+		var upcomingEvents []*event.Event
+		for _, evt := range matchingEvents {
+			if !evt.IsPastEvent() {
+				upcomingEvents = append(upcomingEvents, evt)
+			}
+		}
+		matchingEvents = upcomingEvents
 	}
 
 	if len(matchingEvents) == 0 {
@@ -1320,6 +1366,18 @@ Use /subscribe to start receiving events!`, nil
 				break
 			}
 		}
+	}
+
+	// Apply past event filtering (default: hide past events)
+	user := prefs.GetUser(chatID)
+	if user.HidePastEvents {
+		var upcomingEvents []*event.Event
+		for _, evt := range filteredEvents {
+			if !evt.IsPastEvent() {
+				upcomingEvents = append(upcomingEvents, evt)
+			}
+		}
+		filteredEvents = upcomingEvents
 	}
 
 	if len(filteredEvents) == 0 {
@@ -1663,18 +1721,19 @@ func showMenuKeyboard() (string, *telegram.InlineKeyboardMarkup) {
 	keyboard := &telegram.InlineKeyboardMarkup{
 		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
-				{Text: "📅 Upcoming Events", CallbackData: "menu:upcoming"},
+				{Text: "📅 All Events", CallbackData: "menu:all-events"},
+				{Text: "📊 My Events", CallbackData: "menu:my-events"},
 			},
 			{
-				{Text: "🔍 Search Events", CallbackData: "menu:search"},
+				{Text: "🔍 Search", CallbackData: "menu:search"},
+				{Text: "📆 Upcoming", CallbackData: "menu:upcoming"},
 			},
 			{
-				{Text: "⭐ My Subscriptions", CallbackData: "manage"},
+				{Text: "⭐ Subscriptions", CallbackData: "manage"},
+				{Text: "🔔 Reminders", CallbackData: "menu:reminders"},
 			},
 			{
 				{Text: "⚙️ Settings", CallbackData: "settings"},
-			},
-			{
 				{Text: "❓ Help", CallbackData: "menu:help"},
 			},
 		},
@@ -1739,4 +1798,184 @@ func getUpdatesWithTimeout(botToken string, offset int, timeoutSeconds int) ([]U
 	}
 
 	return result.Result, nil
+}
+
+// sendDigest sends a digest message to a specific user
+func sendDigest(botToken, chatID, digestFile, digestType string) {
+	// Read digest events from file
+	f, err := os.Open(digestFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening digest file: %v\n", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+
+	var result struct {
+		NewEvents []*event.Event `json:"new_events"`
+	}
+
+	decoder := json.NewDecoder(f)
+	if err := decoder.Decode(&result); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing digest JSON: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(result.NewEvents) == 0 {
+		fmt.Println("No events in digest")
+		return
+	}
+
+	// Create Telegram client
+	client, err := telegram.NewClient(botToken, chatID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating Telegram client: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Format and send digest message
+	digestMsg := telegram.FormatDigest(result.NewEvents, digestType)
+
+	if err := client.SendMessage(digestMsg); err != nil {
+		fmt.Fprintf(os.Stderr, "Error sending digest: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Successfully sent %s digest with %d event(s) to %s\n", digestType, len(result.NewEvents), chatID)
+}
+
+// handleBulkWithKeyboard shows the bulk actions menu
+func handleBulkWithKeyboard(prefs preferences.Preferences, chatID, botToken string, dryRun bool) (string, []*event.Event) {
+	text, keyboard := showBulkActionsKeyboard(prefs, chatID)
+
+	if !dryRun {
+		client, err := telegram.NewClient(botToken, chatID)
+		if err != nil {
+			return "❌ Error displaying bulk actions menu", nil
+		}
+
+		if err := client.SendMessageWithKeyboard(text, keyboard); err != nil {
+			return "❌ Error sending bulk actions menu", nil
+		}
+		return "", nil // Message sent via keyboard
+	}
+
+	return text, nil
+}
+
+// showBulkActionsKeyboard creates the bulk actions keyboard
+func showBulkActionsKeyboard(prefs preferences.Preferences, chatID string) (string, *telegram.InlineKeyboardMarkup) {
+	user := prefs.GetUser(chatID)
+
+	// Count events by status
+	skippedCount := len(user.GetEventsByStatus(preferences.EventStatusSkip))
+	registeredCount := len(user.GetEventsByStatus(preferences.EventStatusRegistered))
+
+	text := `🔧 <b>Bulk Actions</b>
+
+Manage multiple events at once:
+
+<b>Event Status Cleanup:</b>
+• Clear all skipped events
+
+<b>Calendar Export:</b>
+• Export all registered events to calendar`
+
+	if skippedCount > 0 {
+		text += fmt.Sprintf("\n\nYou have <b>%d</b> skipped event(s)", skippedCount)
+	}
+	if registeredCount > 0 {
+		text += fmt.Sprintf("\n\nYou have <b>%d</b> registered event(s)", registeredCount)
+	}
+
+	keyboard := &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
+			{
+				{Text: fmt.Sprintf("🗑 Clear Skipped (%d)", skippedCount), CallbackData: "bulk:clear-skipped"},
+			},
+			{
+				{Text: fmt.Sprintf("📥 Export Registered (%d)", registeredCount), CallbackData: "bulk:export-registered"},
+			},
+			{
+				{Text: "🔙 Back to Menu", CallbackData: "menu:main"},
+			},
+		},
+	}
+
+	return text, keyboard
+}
+
+// handleBulkCallback handles bulk action callbacks
+func handleBulkCallback(prefs preferences.Preferences, chatID, action string, modified *bool, botToken string, dryRun bool) (string, *telegram.InlineKeyboardMarkup) {
+	user := prefs.GetUser(chatID)
+
+	switch action {
+	case "clear-skipped":
+		// Clear all skipped events
+		skippedEvents := user.GetEventsByStatus(preferences.EventStatusSkip)
+		if len(skippedEvents) == 0 {
+			return "ℹ️ No skipped events to clear", nil
+		}
+
+		for _, eventID := range skippedEvents {
+			user.RemoveEventStatus(eventID)
+		}
+		*modified = true
+
+		return fmt.Sprintf("✅ Cleared <b>%d</b> skipped event(s)", len(skippedEvents)), nil
+
+	case "export-registered":
+		// Export all registered events to a single calendar file
+		registeredEventIDs := user.GetEventsByStatus(preferences.EventStatusRegistered)
+		if len(registeredEventIDs) == 0 {
+			return "ℹ️ No registered events to export", nil
+		}
+
+		// Fetch current events to get full event data
+		sc := scraper.New()
+		allEvents, err := sc.FetchEvents()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
+			return "❌ Error fetching event data", nil
+		}
+
+		// Find registered events
+		var registeredEvents []*event.Event
+		for _, evt := range allEvents {
+			for _, regID := range registeredEventIDs {
+				if evt.ID == regID {
+					registeredEvents = append(registeredEvents, evt)
+					break
+				}
+			}
+		}
+
+		if len(registeredEvents) == 0 {
+			return "ℹ️ None of your registered events are currently available on the VGA website", nil
+		}
+
+		// Generate combined .ics file
+		icsContent := calendar.GenerateMultiEventICS(registeredEvents)
+		filename := "vga-registered-events.ics"
+
+		if !dryRun {
+			client, err := telegram.NewClient(botToken, chatID)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error creating client: %v\n", err)
+				return "❌ Error sending calendar file", nil
+			}
+
+			caption := fmt.Sprintf("📅 <b>Your Registered Events</b>\n\n%d event(s) ready to import to your calendar!", len(registeredEvents))
+			if err := client.SendDocument(filename, []byte(icsContent), caption); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending document: %v\n", err)
+				return "❌ Error sending calendar file", nil
+			}
+
+			return fmt.Sprintf("✅ Calendar file sent with <b>%d</b> registered event(s)!", len(registeredEvents)), nil
+		}
+
+		return fmt.Sprintf("[DRY RUN] Would export %d registered event(s) to calendar", len(registeredEvents)), nil
+
+	default:
+		return "❌ Unknown bulk action", nil
+	}
 }

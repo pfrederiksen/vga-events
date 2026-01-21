@@ -76,6 +76,12 @@ func GenerateICS(evt *event.Event) string {
 	return ics.String()
 }
 
+// GenerateMultiEventICS generates an iCalendar file with multiple events
+// This is a convenience wrapper for GenerateBulkICS with a default name
+func GenerateMultiEventICS(events []*event.Event) string {
+	return GenerateBulkICS(events, "VGA Registered Events")
+}
+
 // GenerateBulkICS generates an iCalendar (.ics) file with multiple events
 func GenerateBulkICS(events []*event.Event, calendarName string) string {
 	if len(events) == 0 {

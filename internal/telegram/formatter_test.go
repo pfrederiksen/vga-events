@@ -29,7 +29,7 @@ func TestFormatEvent(t *testing.T) {
 			contains: []string{
 				"NV",
 				"Chimera Golf Club",
-				"Apr 04 2026",
+				"Apr 4, 2026", // Enhanced date format includes day of week
 				"Las Vegas",
 				"vgagolf.org/state-events",
 				"login required",
@@ -74,7 +74,7 @@ func TestFormatEvent(t *testing.T) {
 			contains: []string{
 				"TX",
 				"Dallas Country Club",
-				"May 15 2026",
+				"May 15, 2026", // Enhanced date format
 				"#Golf",
 				"#TX",
 			},
