@@ -20,6 +20,9 @@ import (
 const (
 	// AllStatesCode is the special state code to match all states
 	AllStatesCode = "ALL"
+
+	// Error messages
+	errFetchingEvents = "❌ Error fetching events. Please try again later."
 )
 
 var (
@@ -385,7 +388,7 @@ Use /subscribe to start receiving event notifications!`
 	allEvents, err := sc.FetchEvents()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
-		return "❌ Error fetching events. Please try again later."
+		return errFetchingEvents
 	}
 
 	// Filter events by subscribed states
@@ -787,6 +790,9 @@ Please provide a search keyword.
 	case "/my-events":
 		return handleMyEvents(prefs, chatID, botToken, dryRun)
 
+	case "/events":
+		return handleAllEvents(prefs, chatID, botToken, dryRun)
+
 	case "/reminders":
 		return handleRemindersWithKeyboard(prefs, chatID, botToken, dryRun)
 
@@ -807,6 +813,7 @@ I help you track VGA Golf events in your favorite states!
 
 /menu - Quick actions menu 🎯
 /search - Search for events by keyword 🔍
+/events - View all events for your subscribed states 📅
 /my-events - View your tracked events ⭐
 /reminders - Configure event reminders 🔔
 /export-calendar - Download all events as .ics file 📅
@@ -976,7 +983,7 @@ func handleSearch(prefs preferences.Preferences, chatID, keyword string, botToke
 	allEvents, err := sc.FetchEvents()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
-		return "❌ Error fetching events. Please try again later.", nil
+		return errFetchingEvents, nil
 	}
 
 	// Filter events by keyword (case-insensitive search in title, city, state)
@@ -1081,7 +1088,7 @@ Or use /export-calendar &lt;STATE&gt; to export events from a specific state.`, 
 	allEvents, err := sc.FetchEvents()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
-		return "❌ Error fetching events. Please try again later.", nil
+		return errFetchingEvents, nil
 	}
 
 	// Filter events by states
@@ -1166,7 +1173,7 @@ Then use /my-events to see all your tracked events!`, nil
 	allEvents, err := sc.FetchEvents()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
-		return "❌ Error fetching events. Please try again later.", nil
+		return errFetchingEvents, nil
 	}
 
 	// Create a map of event IDs to events for quick lookup
@@ -1276,6 +1283,92 @@ You have %d tracked event(s):`, totalEvents)
 	}
 
 	return fmt.Sprintf("[DRY RUN] Would send %d tracked events", totalEvents), nil
+}
+
+func handleAllEvents(prefs preferences.Preferences, chatID string, botToken string, dryRun bool) (string, []*event.Event) {
+	// Get user's subscribed states
+	states := prefs.GetStates(chatID)
+	if len(states) == 0 {
+		return `📅 <b>All Events</b>
+
+You're not subscribed to any states yet.
+
+Use /subscribe to start receiving events!`, nil
+	}
+
+	// Fetch all events
+	sc := scraper.New()
+	allEvents, err := sc.FetchEvents()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
+		return errFetchingEvents, nil
+	}
+
+	// Filter events by subscribed states
+	var filteredEvents []*event.Event
+	for _, evt := range allEvents {
+		for _, state := range states {
+			if state == AllStatesCode || strings.EqualFold(evt.State, state) {
+				filteredEvents = append(filteredEvents, evt)
+				break
+			}
+		}
+	}
+
+	if len(filteredEvents) == 0 {
+		return fmt.Sprintf(`📅 <b>All Events</b>
+
+No events found for your subscribed states: %s
+
+Check back later or subscribe to more states with /subscribe`, strings.Join(states, ", ")), nil
+	}
+
+	// Sort by date (soonest first)
+	event.SortByDate(filteredEvents)
+
+	// Limit to 50 events to avoid overwhelming the user
+	eventsToSend := filteredEvents
+	if len(eventsToSend) > 50 {
+		eventsToSend = eventsToSend[:50]
+	}
+
+	// Send events with status tracking buttons
+	if !dryRun {
+		client, err := telegram.NewClient(botToken, chatID)
+		if err != nil {
+			return "❌ Error sending events", nil
+		}
+
+		// Send header message
+		headerMsg := fmt.Sprintf(`📅 <b>All Events</b>
+
+Found %d event(s) for %s
+
+Showing %d event(s), sorted by date:`, len(filteredEvents), strings.Join(states, ", "), len(eventsToSend))
+
+		if err := client.SendMessage(headerMsg); err != nil {
+			fmt.Fprintf(os.Stderr, "Error sending header: %v\n", err)
+		}
+
+		// Send each event with status buttons
+		user := prefs.GetUser(chatID)
+		for i, evt := range eventsToSend {
+			currentStatus := user.GetEventStatus(evt.ID)
+			msg, keyboard := telegram.FormatEventWithStatus(evt, currentStatus)
+			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
+			}
+
+			// Rate limiting
+			if i < len(eventsToSend)-1 {
+				time.Sleep(1 * time.Second)
+			}
+		}
+
+		return "", nil // Already sent
+	}
+
+	return fmt.Sprintf("[DRY RUN] Would send %d events for %s", len(eventsToSend), strings.Join(states, ", ")), nil
 }
 
 // buildEventPreviewKeyboard returns a keyboard asking how many events to preview

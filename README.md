@@ -139,6 +139,7 @@ Send these commands to your bot in Telegram:
 
 **Event Discovery:**
 - `/search <keyword>` - Search for events (e.g., `/search "Pine Valley"`)
+- `/events` - View all events for your subscribed states
 - `/my-events` - View events you've marked as interested/registered
 - `/export-calendar` - Download all events as .ics calendar file
 
