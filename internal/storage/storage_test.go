@@ -15,7 +15,11 @@ func TestGetEventByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to clean up temp dir: %v", err)
+		}
+	}()
 
 	// Create storage instance
 	storage, err := New(tmpDir)
@@ -111,7 +115,9 @@ func TestGetEventByID(t *testing.T) {
 			name: "No snapshot file exists",
 			setup: func() {
 				// Remove all snapshot files
-				os.RemoveAll(filepath.Join(tmpDir, "snapshot.json"))
+				if err := os.RemoveAll(filepath.Join(tmpDir, "snapshot.json")); err != nil {
+					t.Logf("Warning: failed to remove snapshot file: %v", err)
+				}
 			},
 			eventID:       "event-123",
 			wantEvent:     nil,
@@ -171,7 +177,11 @@ func TestGetEventByID_StateSpecificFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to clean up temp dir: %v", err)
+		}
+	}()
 
 	// Create storage instance
 	storage, err := New(tmpDir)

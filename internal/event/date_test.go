@@ -238,13 +238,13 @@ func TestEvent_IsUpcoming(t *testing.T) {
 
 func TestSortByDate(t *testing.T) {
 	tests := []struct {
-		name     string
-		events   []*Event
+		name      string
+		events    []*Event
 		wantOrder []string // Expected order of DateText values
 	}{
 		{
-			name: "Empty slice",
-			events: []*Event{},
+			name:      "Empty slice",
+			events:    []*Event{},
 			wantOrder: []string{},
 		},
 		{
@@ -275,9 +275,9 @@ func TestSortByDate(t *testing.T) {
 		{
 			name: "Mixed formats",
 			events: []*Event{
-				{DateText: "4.4.26"},      // Apr 4, 2026
-				{DateText: "Jan 1 2026"},   // Jan 1, 2026
-				{DateText: "02/15/26"},     // Feb 15, 2026
+				{DateText: "4.4.26"},     // Apr 4, 2026
+				{DateText: "Jan 1 2026"}, // Jan 1, 2026
+				{DateText: "02/15/26"},   // Feb 15, 2026
 			},
 			wantOrder: []string{"Jan 1 2026", "02/15/26", "4.4.26"},
 		},
