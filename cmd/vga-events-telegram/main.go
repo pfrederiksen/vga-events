@@ -103,11 +103,10 @@ func main() {
 	if *dryRun {
 		fmt.Printf("DRY RUN MODE - Would send %d messages:\n\n", len(events))
 		for i, evt := range events {
-			msg, _ := telegram.FormatEventWithCalendar(evt)
+			msg := telegram.FormatEvent(evt)
 			fmt.Printf("--- Message %d/%d ---\n", i+1, len(events))
 			fmt.Println(msg)
-			fmt.Printf("\n(Length: %d characters)\n", len(msg))
-			fmt.Printf("Calendar button: 📅 Add to Calendar (callback: calendar:%s)\n\n", evt.ID)
+			fmt.Printf("\n(Length: %d characters)\n\n", len(msg))
 		}
 		os.Exit(0)
 	}
@@ -129,11 +128,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Send messages with calendar buttons
+	// Send messages
 	for i, evt := range events {
-		msg, keyboard := telegram.FormatEventWithCalendar(evt)
+		msg := telegram.FormatEvent(evt)
 
-		if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
+		if err := client.SendMessage(msg); err != nil {
 			fmt.Fprintf(os.Stderr, "Error sending message for event %s: %v\n", evt.ID, err)
 			os.Exit(1)
 		}
