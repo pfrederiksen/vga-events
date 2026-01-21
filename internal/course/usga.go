@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -162,16 +164,79 @@ func (c *USGAClient) searchCourses(clubName, clubCity, clubState, clubCountry st
 	return result.Data, nil
 }
 
-// getCourseDetails fetches detailed tee information for a course
-// Note: This is a placeholder - actual endpoint may differ
+// getCourseDetails fetches detailed tee information for a course by parsing HTML
+// Note: This uses HTML parsing since USGA doesn't provide a JSON API for course details.
+// The parsing is best-effort and may fail if the HTML structure changes.
+// Graceful degradation: If parsing fails, SearchCourse falls back to basic info.
 func (c *USGAClient) getCourseDetails(courseID string) (*USGACourseDetails, error) {
-	// The USGA site uses courseTeeInfo.aspx?CourseID=XXXXX
-	// This page contains detailed tee information
-	// We would need to parse the HTML or find a JSON endpoint
+	detailsURL := fmt.Sprintf("%s/courseTeeInfo?CourseID=%s", c.BaseURL, courseID)
 
-	// For now, return nil to indicate details not available
-	// This means we'll use basic search result data
-	return nil, fmt.Errorf("details endpoint not implemented")
+	req, err := http.NewRequest("GET", detailsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("User-Agent", c.UserAgent)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching course details: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+
+	htmlContent := string(body)
+
+	// Parse course name and location
+	details := &USGACourseDetails{
+		Tees: []USGATee{},
+	}
+
+	// Extract course name - look for heading or title
+	courseNameRe := regexp.MustCompile(`<h2[^>]*>([^<]+)</h2>`)
+	if matches := courseNameRe.FindStringSubmatch(htmlContent); len(matches) > 1 {
+		details.CourseName = strings.TrimSpace(matches[1])
+	}
+
+	// Parse tee information from table rows
+	// Look for patterns like: White | 72 | 6500 | 125 | 71.5
+	teeRowRe := regexp.MustCompile(`(?i)<tr[^>]*>.*?<td[^>]*>([^<]+)</td>.*?<td[^>]*>(\d+)</td>.*?<td[^>]*>(\d+)</td>.*?<td[^>]*>(\d+)</td>.*?<td[^>]*>([\d.]+)</td>`)
+
+	matches := teeRowRe.FindAllStringSubmatch(htmlContent, -1)
+	for _, match := range matches {
+		if len(match) >= 6 {
+			teeColor := strings.TrimSpace(match[1])
+			par, _ := strconv.Atoi(match[2])
+			yardage, _ := strconv.Atoi(match[3])
+			slope, _ := strconv.Atoi(match[4])
+			rating, _ := strconv.ParseFloat(match[5], 64)
+
+			if par > 0 && yardage > 0 {
+				details.Tees = append(details.Tees, USGATee{
+					TeeColor:     teeColor,
+					TeeName:      teeColor,
+					Par:          par,
+					Yardage:      yardage,
+					SlopeRating:  slope,
+					CourseRating: rating,
+				})
+			}
+		}
+	}
+
+	if len(details.Tees) == 0 {
+		return nil, fmt.Errorf("no tee information found in HTML")
+	}
+
+	return details, nil
 }
 
 // findBestUSGAMatch finds the best matching course from search results
