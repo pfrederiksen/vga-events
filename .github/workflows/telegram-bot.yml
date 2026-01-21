@@ -88,7 +88,12 @@ jobs:
         if: steps.check.outputs.new_events == 'true' && steps.prefs.outputs.users != ''
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
+          TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
         run: |
+          # Track whether we need to save preferences
+          PREFS_MODIFIED=false
+
           # For each user, filter events by their subscribed states and send
           while IFS= read -r CHAT_ID; do
             [ -z "$CHAT_ID" ] && continue
@@ -105,27 +110,130 @@ jobs:
 
             echo "  Subscribed states: $STATES"
 
-            # Filter events by user's states
-            jq --arg states "$STATES" '
+            # Get user's seen event IDs (if they exist)
+            SEEN_IDS=$(jq -r --arg chat "$CHAT_ID" '.[$chat].seen_event_ids // {} | keys | join(",")' preferences.json)
+
+            # Get user's time-based filtering preferences
+            HIDE_PAST=$(jq -r --arg chat "$CHAT_ID" '.[$chat].hide_past_events // true' preferences.json)
+            DAYS_AHEAD=$(jq -r --arg chat "$CHAT_ID" '.[$chat].days_ahead // 0' preferences.json)
+
+            # Get user's digest preference
+            DIGEST_FREQ=$(jq -r --arg chat "$CHAT_ID" '.[$chat].digest_frequency // "immediate"' preferences.json)
+
+            echo "  Time filters: hide_past=$HIDE_PAST, days_ahead=$DAYS_AHEAD"
+            echo "  Digest mode: $DIGEST_FREQ"
+
+            # Filter events by user's states AND exclude already seen events
+            jq --arg states "$STATES" --arg seen "$SEEN_IDS" '
               .new_events as $events |
               ($states | split(",")) as $subscribed |
+              (if $seen == "" then [] else ($seen | split(",")) end) as $seen_ids |
               {
                 checked_at: .checked_at,
-                new_events: ($events | map(select(.state as $s | $subscribed | index($s)))),
-                event_count: ($events | map(select(.state as $s | $subscribed | index($s))) | length)
+                new_events: ($events | map(select(
+                  (.state as $s | $subscribed | index($s)) and
+                  (.id as $id | $seen_ids | index($id) | not)
+                ))),
+                event_count: ($events | map(select(
+                  (.state as $s | $subscribed | index($s)) and
+                  (.id as $id | $seen_ids | index($id) | not)
+                )) | length)
               }
             ' events.json > "user_events_${CHAT_ID}.json"
 
             EVENT_COUNT=$(jq -r '.event_count' "user_events_${CHAT_ID}.json")
 
+            if [ -n "$SEEN_IDS" ]; then
+              SEEN_COUNT=$(echo "$SEEN_IDS" | tr ',' '\n' | wc -l | tr -d ' ')
+              echo "  User has seen $SEEN_COUNT event(s) previously"
+            fi
+
             if [ "$EVENT_COUNT" -gt 0 ]; then
-              echo "  Sending $EVENT_COUNT event(s) to user $CHAT_ID..."
-              ./vga-events-telegram --chat-id "$CHAT_ID" --events-file "user_events_${CHAT_ID}.json" --max-messages 10
+              if [ "$DIGEST_FREQ" = "immediate" ]; then
+                echo "  Sending $EVENT_COUNT new event(s) immediately to user $CHAT_ID..."
+
+                # Send events with time-based filtering
+                if ./vga-events-telegram --chat-id "$CHAT_ID" --events-file "user_events_${CHAT_ID}.json" --max-messages 10 --hide-past="$HIDE_PAST" --days-ahead="$DAYS_AHEAD"; then
+                  echo "  ✅ Successfully sent events"
+
+                  # Mark events as seen by adding their IDs with timestamps to preferences
+                  CURRENT_TIME=$(date +%s)
+                  EVENT_IDS=$(jq -r '.new_events[].id' "user_events_${CHAT_ID}.json")
+
+                  for EVENT_ID in $EVENT_IDS; do
+                    jq --arg chat "$CHAT_ID" --arg event_id "$EVENT_ID" --argjson timestamp "$CURRENT_TIME" \
+                      '.[$chat].seen_event_ids[$event_id] = $timestamp' \
+                      preferences.json > preferences.tmp && mv preferences.tmp preferences.json
+                  done
+
+                  echo "  📝 Marked $EVENT_COUNT event(s) as seen"
+                  PREFS_MODIFIED=true
+                else
+                  echo "  ❌ Failed to send events"
+                fi
+              else
+                echo "  Adding $EVENT_COUNT event(s) to $DIGEST_FREQ digest queue..."
+
+                # Add events to pending_events array
+                jq --arg chat "$CHAT_ID" --slurpfile events "user_events_${CHAT_ID}.json" \
+                  '.[$chat].pending_events = (.[$chat].pending_events // []) + $events[0].new_events' \
+                  preferences.json > preferences.tmp && mv preferences.tmp preferences.json
+
+                # Mark events as seen (so they don't get re-added to digest)
+                CURRENT_TIME=$(date +%s)
+                EVENT_IDS=$(jq -r '.new_events[].id' "user_events_${CHAT_ID}.json")
+
+                for EVENT_ID in $EVENT_IDS; do
+                  jq --arg chat "$CHAT_ID" --arg event_id "$EVENT_ID" --argjson timestamp "$CURRENT_TIME" \
+                    '.[$chat].seen_event_ids[$event_id] = $timestamp' \
+                    preferences.json > preferences.tmp && mv preferences.tmp preferences.json
+                done
+
+                echo "  📝 Added to digest queue and marked as seen"
+                PREFS_MODIFIED=true
+              fi
             else
-              echo "  No matching events for user $CHAT_ID"
+              echo "  No new events for user $CHAT_ID (all already seen or no matching states)"
             fi
 
           done <<< "${{ steps.prefs.outputs.users }}"
+
+          # Save updated preferences back to Gist if modified
+          if [ "$PREFS_MODIFIED" = true ]; then
+            echo ""
+            echo "Saving updated preferences to Gist..."
+
+            # Cleanup old event history (older than 90 days) to prevent unbounded growth
+            CUTOFF_TIME=$(($(date +%s) - 7776000))  # 90 days in seconds
+            echo "Cleaning up event history older than 90 days (cutoff: $CUTOFF_TIME)..."
+
+            # For each user, remove old event IDs
+            jq --argjson cutoff "$CUTOFF_TIME" '
+              to_entries | map(
+                .value.seen_event_ids = (
+                  .value.seen_event_ids // {} |
+                  to_entries |
+                  map(select(.value >= $cutoff)) |
+                  from_entries
+                )
+              ) | from_entries
+            ' preferences.json > preferences.tmp && mv preferences.tmp preferences.json
+
+            echo "✅ Cleanup complete"
+
+            # Update Gist with modified preferences
+            GIST_CONTENT=$(jq -Rs . preferences.json)
+            curl -s -X PATCH \
+              -H "Authorization: token $TELEGRAM_GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/gists/$TELEGRAM_GIST_ID" \
+              -d "{\"files\":{\"preferences.json\":{\"content\":$GIST_CONTENT}}}" > /dev/null
+
+            echo "✅ Preferences saved"
+          else
+            echo ""
+            echo "No preference updates needed"
+          fi
 
       - name: Save snapshots cache
         if: steps.check.outputs.exit_code != '1'

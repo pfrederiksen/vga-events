@@ -19,6 +19,8 @@ var (
 	dryRun      = flag.Bool("dry-run", false, "Print messages without sending")
 	maxMessages = flag.Int("max-messages", 10, "Maximum number of messages to send")
 	stateFilter = flag.String("state", "", "Only send messages for this state")
+	hidePast    = flag.Bool("hide-past", true, "Filter out past events (default: true)")
+	daysAhead   = flag.Int("days-ahead", 0, "Only show events within N days (0 = disabled)")
 )
 
 func main() {
@@ -66,6 +68,23 @@ func main() {
 			if evt.State == *stateFilter {
 				filtered = append(filtered, evt)
 			}
+		}
+		events = filtered
+	}
+
+	// Apply time-based filtering
+	if *hidePast || *daysAhead > 0 {
+		filtered := make([]*event.Event, 0)
+		for _, evt := range events {
+			// Filter past events if enabled
+			if *hidePast && evt.IsPastEvent() {
+				continue
+			}
+			// Filter events beyond days_ahead window if enabled
+			if *daysAhead > 0 && !evt.IsWithinDays(*daysAhead) {
+				continue
+			}
+			filtered = append(filtered, evt)
 		}
 		events = filtered
 	}

@@ -4,12 +4,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/pfrederiksen/vga-events/internal/event"
 )
 
 // UserPreferences represents a user's subscription preferences
 type UserPreferences struct {
+	// Core subscription settings
 	States []string `json:"states"`
 	Active bool     `json:"active"`
+
+	// Event history tracking (Feature 1)
+	// Key: event.ID, Value: Unix timestamp when first seen
+	SeenEventIDs map[string]int64 `json:"seen_event_ids,omitempty"`
+
+	// Digest mode configuration (Feature 4)
+	DigestFrequency string         `json:"digest_frequency,omitempty"` // "immediate", "daily", "weekly"
+	DigestDayOfWeek int            `json:"digest_day_of_week,omitempty"` // 0-6 for weekly digest
+	DigestHour      int            `json:"digest_hour,omitempty"`      // 0-23 UTC
+	PendingEvents   []*event.Event `json:"pending_events,omitempty"`   // Events queued for digest
+
+	// Time-based filtering (Feature 3)
+	DaysAhead      int  `json:"days_ahead,omitempty"`       // 0 = disabled, >0 = only show events within N days
+	HidePastEvents bool `json:"hide_past_events,omitempty"` // Default: true
 }
 
 // Preferences maps chat IDs to user preferences
@@ -26,15 +44,41 @@ func NewPreferences() Preferences {
 	return make(Preferences)
 }
 
-// GetUser retrieves preferences for a specific user, creating them if they don't exist
+// GetUser retrieves preferences for a specific user, creating them if they don't exist.
+// For existing users, initializes new fields with default values (migration).
 func (p Preferences) GetUser(chatID string) *UserPreferences {
-	if user, exists := p[chatID]; exists {
+	user, exists := p[chatID]
+
+	if exists {
+		// Migration: initialize new fields if they don't exist
+		if user.SeenEventIDs == nil {
+			user.SeenEventIDs = make(map[string]int64)
+		}
+		if user.DigestFrequency == "" {
+			user.DigestFrequency = "immediate" // Keep current behavior
+		}
+		if user.DigestHour == 0 && user.DigestFrequency != "immediate" {
+			user.DigestHour = 9 // 9 AM UTC default
+		}
+		if user.DigestDayOfWeek == 0 && user.DigestFrequency == "weekly" {
+			user.DigestDayOfWeek = 1 // Monday default
+		}
+		// Note: HidePastEvents defaults to false (zero value) for backward compatibility
+		// Users can enable it via settings
 		return user
 	}
+
 	// Create new user with default preferences
 	p[chatID] = &UserPreferences{
-		States: []string{},
-		Active: true,
+		States:          []string{},
+		Active:          true,
+		SeenEventIDs:    make(map[string]int64),
+		DigestFrequency: "immediate",
+		DigestHour:      9,
+		DigestDayOfWeek: 1,
+		DaysAhead:       0,    // Disabled by default
+		HidePastEvents:  true, // New users hide past events by default
+		PendingEvents:   []*event.Event{},
 	}
 	return p[chatID]
 }
@@ -176,4 +220,65 @@ func GetStateName(code string) string {
 		return name
 	}
 	return code
+}
+
+// CleanupOldHistory removes event history entries older than the specified number of days.
+// This prevents SeenEventIDs from growing unbounded.
+func (u *UserPreferences) CleanupOldHistory(daysToKeep int) int {
+	if u.SeenEventIDs == nil {
+		return 0
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -daysToKeep).Unix()
+	removed := 0
+
+	for eventID, timestamp := range u.SeenEventIDs {
+		if timestamp < cutoff {
+			delete(u.SeenEventIDs, eventID)
+			removed++
+		}
+	}
+
+	return removed
+}
+
+// MarkEventSeen records that a user has seen a specific event.
+func (u *UserPreferences) MarkEventSeen(eventID string) {
+	if u.SeenEventIDs == nil {
+		u.SeenEventIDs = make(map[string]int64)
+	}
+	u.SeenEventIDs[eventID] = time.Now().Unix()
+}
+
+// HasSeenEvent checks if a user has already seen a specific event.
+func (u *UserPreferences) HasSeenEvent(eventID string) bool {
+	if u.SeenEventIDs == nil {
+		return false
+	}
+	_, seen := u.SeenEventIDs[eventID]
+	return seen
+}
+
+// AddPendingEvent adds an event to the user's pending digest queue.
+func (u *UserPreferences) AddPendingEvent(evt *event.Event) {
+	if u.PendingEvents == nil {
+		u.PendingEvents = []*event.Event{}
+	}
+	u.PendingEvents = append(u.PendingEvents, evt)
+}
+
+// ClearPendingEvents removes all pending events (called after digest is sent).
+func (u *UserPreferences) ClearPendingEvents() {
+	u.PendingEvents = []*event.Event{}
+}
+
+// SetDigestFrequency updates the digest frequency setting.
+// Valid values: "immediate", "daily", "weekly"
+func (u *UserPreferences) SetDigestFrequency(frequency string) bool {
+	frequency = strings.ToLower(strings.TrimSpace(frequency))
+	if frequency != "immediate" && frequency != "daily" && frequency != "weekly" {
+		return false
+	}
+	u.DigestFrequency = frequency
+	return true
 }
