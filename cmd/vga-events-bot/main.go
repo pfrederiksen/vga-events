@@ -867,6 +867,15 @@ Please provide a search keyword.
 	case "/notes":
 		return handleListNotes(prefs, chatID, botToken, dryRun)
 
+	case "/near":
+		if len(parts) < 2 {
+			return "❌ Please specify a city name.\n\nUsage: /near &lt;city&gt;\n\nExamples:\n/near Las Vegas\n/near \"San Diego\"", nil
+		}
+		// Join remaining parts as city name (supports multi-word cities)
+		cityName := strings.Join(parts[1:], " ")
+		cityName = strings.Trim(cityName, `"'`) // Remove quotes if present
+		return handleNear(prefs, chatID, cityName, botToken, dryRun)
+
 	case "/reminders":
 		return handleRemindersWithKeyboard(prefs, chatID, botToken, dryRun)
 
@@ -890,6 +899,7 @@ I help you track VGA Golf events in your favorite states!
 
 /menu - Quick actions menu 🎯
 /search - Search for events by keyword 🔍
+/near - Find events near a city 📍
 /events - View all events for your subscribed states 📅
 /my-events - View your tracked events ⭐
 /note - Add a note to an event 📝
@@ -1064,6 +1074,88 @@ func handleRemoveNote(prefs preferences.Preferences, chatID, eventID string, mod
 	*modified = true
 
 	return fmt.Sprintf("✅ Note removed for event <code>%s</code>", eventID), nil
+}
+
+// handleNear finds events near a specified city
+func handleNear(prefs preferences.Preferences, chatID, cityName, botToken string, dryRun bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+	if len(user.States) == 0 {
+		return "ℹ️ You need to subscribe to at least one state first.\n\nUse /subscribe &lt;STATE&gt; to get started.", nil
+	}
+
+	// Fetch current events
+	sc := scraper.New()
+	allEvents, err := sc.FetchEvents()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
+		return "❌ Error fetching events. Please try again later.", nil
+	}
+
+	// Filter events by subscribed states first
+	var subscribedEvents []*event.Event
+	for _, evt := range allEvents {
+		for _, state := range user.States {
+			if evt.State == state {
+				subscribedEvents = append(subscribedEvents, evt)
+				break
+			}
+		}
+	}
+
+	// Filter by city (case-insensitive substring match)
+	normalizedCity := strings.ToLower(strings.TrimSpace(cityName))
+	var matchingEvents []*event.Event
+	for _, evt := range subscribedEvents {
+		if strings.Contains(strings.ToLower(evt.City), normalizedCity) {
+			// Apply user's date filter if enabled
+			if user.DaysAhead > 0 && !evt.IsWithinDays(user.DaysAhead) {
+				continue
+			}
+			// Filter past events if enabled
+			if user.HidePastEvents && evt.IsPastEvent() {
+				continue
+			}
+			matchingEvents = append(matchingEvents, evt)
+		}
+	}
+
+	if len(matchingEvents) == 0 {
+		return fmt.Sprintf("📍 No events found near <b>%s</b> in your subscribed states.\n\nTry a different city name or check your subscriptions with /list", cityName), nil
+	}
+
+	// Sort by date
+	event.SortByDate(matchingEvents)
+
+	// Send header
+	client, err := telegram.NewClient(botToken, chatID)
+	if err != nil {
+		return fmt.Sprintf("📍 <b>Events near %s</b>\n\nFound %d event(s)", cityName, len(matchingEvents)), nil
+	}
+
+	headerMsg := fmt.Sprintf("📍 <b>Events near %s</b>\n\nFound %d event(s) in your subscribed states:", cityName, len(matchingEvents))
+	if err := client.SendMessage(headerMsg); err != nil {
+		fmt.Fprintf(os.Stderr, "Error sending header: %v\n", err)
+	}
+
+	// Send each event
+	for i, evt := range matchingEvents {
+		currentStatus := user.GetEventStatus(evt.ID)
+		note := user.GetEventNote(evt.ID)
+		msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note)
+
+		if !dryRun {
+			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
+			}
+
+			// Rate limiting
+			if i < len(matchingEvents)-1 {
+				time.Sleep(1 * time.Second)
+			}
+		}
+	}
+
+	return "", nil // Already sent via messages
 }
 
 // handleListNotes lists all events with notes
