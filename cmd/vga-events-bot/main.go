@@ -735,6 +735,11 @@ Example:
 		// Format: bulk:ACTION (e.g., "bulk:clear-skipped", "bulk:export-registered")
 		responseText, keyboard = handleBulkCallback(prefs, chatID, param, modified, botToken, dryRun)
 
+	case "ack-change":
+		// Acknowledge event change notification
+		// Format: ack-change:EVENT_ID
+		responseText = "✅ Change acknowledged. You can update your calendar if needed."
+
 	default:
 		responseText = "Unknown action"
 	}

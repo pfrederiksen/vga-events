@@ -201,3 +201,87 @@ func FormatReminder(evt *event.Event, daysUntil int) (string, *InlineKeyboardMar
 
 	return msg.String(), keyboard
 }
+
+// FormatEventChange formats an event change notification
+func FormatEventChange(evt *event.Event, changeType, oldValue, newValue string) string {
+	var msg strings.Builder
+
+	msg.WriteString("⚠️ <b>Event Updated!</b>\n\n")
+	msg.WriteString(fmt.Sprintf("📍 <b>%s</b> - %s\n\n", evt.State, evt.Title))
+
+	// Show what changed
+	switch changeType {
+	case "date":
+		msg.WriteString("📅 <b>Date Changed:</b>\n")
+		if oldValue != "" {
+			msg.WriteString(fmt.Sprintf("  ❌ <s>%s</s>\n", oldValue))
+		} else {
+			msg.WriteString("  ❌ <s>No date</s>\n")
+		}
+		if newValue != "" {
+			niceDate := event.FormatDateNice(newValue)
+			msg.WriteString(fmt.Sprintf("  ✅ %s\n", niceDate))
+		} else {
+			msg.WriteString("  ✅ No date\n")
+		}
+	case "title":
+		msg.WriteString("🏌️ <b>Title Changed:</b>\n")
+		msg.WriteString(fmt.Sprintf("  ❌ <s>%s</s>\n", oldValue))
+		msg.WriteString(fmt.Sprintf("  ✅ %s\n", newValue))
+	case "city":
+		msg.WriteString("🏢 <b>City Changed:</b>\n")
+		if oldValue != "" {
+			msg.WriteString(fmt.Sprintf("  ❌ <s>%s</s>\n", oldValue))
+		} else {
+			msg.WriteString("  ❌ <s>No city</s>\n")
+		}
+		if newValue != "" {
+			msg.WriteString(fmt.Sprintf("  ✅ %s\n", newValue))
+		} else {
+			msg.WriteString("  ✅ No city\n")
+		}
+	}
+
+	msg.WriteString("\n🔗 <a href=\"https://vgagolf.org/state-events\">vgagolf.org/state-events</a>\n")
+	msg.WriteString("<i>(login required)</i>\n")
+
+	return msg.String()
+}
+
+// FormatEventChangeWithKeyboard formats an event change with interactive buttons
+func FormatEventChangeWithKeyboard(evt *event.Event, changeType, oldValue, newValue string, currentStatus string) (string, *InlineKeyboardMarkup) {
+	text := FormatEventChange(evt, changeType, oldValue, newValue)
+
+	// Add current status indicator if set
+	if currentStatus != "" {
+		statusEmoji := ""
+		statusText := ""
+		switch currentStatus {
+		case "interested":
+			statusEmoji = "⭐"
+			statusText = "You marked this as Interested"
+		case "registered":
+			statusEmoji = "✅"
+			statusText = "You're Registered for this event"
+		case "maybe":
+			statusEmoji = "🤔"
+			statusText = "You marked this as Maybe"
+		}
+		if statusEmoji != "" {
+			text = fmt.Sprintf("%s\n\n%s <i>%s</i>", text, statusEmoji, statusText)
+		}
+	}
+
+	keyboard := &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "📅 Update Calendar", CallbackData: fmt.Sprintf("calendar:%s", evt.ID)},
+			},
+			{
+				{Text: "✅ Acknowledged", CallbackData: fmt.Sprintf("ack-change:%s", evt.ID)},
+			},
+		},
+	}
+
+	return text, keyboard
+}
