@@ -17,6 +17,11 @@ import (
 	"github.com/pfrederiksen/vga-events/internal/telegram"
 )
 
+const (
+	// AllStatesCode is the special state code to match all states
+	AllStatesCode = "ALL"
+)
+
 var (
 	botToken     = flag.String("bot-token", os.Getenv("TELEGRAM_BOT_TOKEN"), "Telegram bot token (or env: TELEGRAM_BOT_TOKEN)")
 	gistID       = flag.String("gist-id", os.Getenv("TELEGRAM_GIST_ID"), "GitHub Gist ID (or env: TELEGRAM_GIST_ID)")
@@ -297,7 +302,7 @@ func handlePreviewCallback(prefs preferences.Preferences, callback *telegram.Cal
 	// Filter events by state and sort by date (soonest first)
 	var stateEvents []*event.Event
 	for _, evt := range allEvents {
-		if state == "ALL" || strings.EqualFold(evt.State, state) {
+		if state == AllStatesCode || strings.EqualFold(evt.State, state) {
 			stateEvents = append(stateEvents, evt)
 		}
 	}
@@ -385,7 +390,7 @@ Use /subscribe to start receiving event notifications!`
 	var filteredEvents []*event.Event
 	for _, evt := range allEvents {
 		for _, state := range states {
-			if state == "ALL" || strings.EqualFold(evt.State, state) {
+			if state == AllStatesCode || strings.EqualFold(evt.State, state) {
 				filteredEvents = append(filteredEvents, evt)
 				break
 			}
@@ -570,7 +575,7 @@ Example:
 		}
 		action := parts[1]
 		days := 0
-		fmt.Sscanf(parts[2], "%d", &days)
+		_, _ = fmt.Sscanf(parts[2], "%d", &days) // Error ignored, days defaults to 0
 
 		user := prefs.GetUser(chatID)
 
@@ -789,7 +794,7 @@ Please provide a search keyword.
 }
 
 func getHelpMessage() string {
-	return `🤖 <b>VGA Events Bot</b>
+	return fmt.Sprintf(`🤖 <b>VGA Events Bot</b>
 
 I help you track VGA Golf events in your favorite states!
 
@@ -820,7 +825,7 @@ Configure reminder timing with /reminders (1 day, 3 days, 1 week, or 2 weeks bef
 
 <b>State Codes:</b>
 Use 2-letter state codes like NV, CA, TX, etc.
-Use ALL to subscribe to all states.
+Use %s to subscribe to all states.
 
 <b>Notifications:</b>
 You'll receive messages whenever new events are posted in your subscribed states.
@@ -830,14 +835,14 @@ You'll receive messages whenever new events are posted in your subscribed states
 
 Change your preferences with /settings
 
-Checks run every hour.`
+Checks run every hour.`, AllStatesCode)
 }
 
 func handleSubscribe(prefs preferences.Preferences, chatID, state string, modified *bool, botToken string, dryRun bool) (string, []*event.Event) {
 	state = strings.ToUpper(strings.TrimSpace(state))
 
 	if !preferences.IsValidState(state) {
-		return fmt.Sprintf("❌ Invalid state code: %s\n\nPlease use a valid 2-letter state code (e.g., NV, CA, TX) or ALL.", state), nil
+		return fmt.Sprintf("❌ Invalid state code: %s\n\nPlease use a valid 2-letter state code (e.g., NV, CA, TX) or %s.", state, AllStatesCode), nil
 	}
 
 	if prefs.HasState(chatID, state) {
@@ -869,7 +874,7 @@ func handleSubscribe(prefs preferences.Preferences, chatID, state string, modifi
 		// Filter and count events by state
 		var stateEvents []*event.Event
 		for _, evt := range allEvents {
-			if state == "ALL" || strings.EqualFold(evt.State, state) {
+			if state == AllStatesCode || strings.EqualFold(evt.State, state) {
 				stateEvents = append(stateEvents, evt)
 			}
 		}
@@ -1048,7 +1053,7 @@ func handleExportCalendar(prefs preferences.Preferences, chatID, stateFilter str
 <b>Usage:</b>
 /export-calendar - Export all your subscribed events
 /export-calendar NV - Export events from Nevada
-/export-calendar ALL - Export events from all states`, stateFilter), nil
+/export-calendar %s - Export events from all states`, stateFilter, AllStatesCode), nil
 		}
 		filterStates = []string{stateFilter}
 	} else {
@@ -1076,7 +1081,7 @@ Or use /export-calendar &lt;STATE&gt; to export events from a specific state.`, 
 	var filteredEvents []*event.Event
 	for _, evt := range allEvents {
 		for _, state := range filterStates {
-			if state == "ALL" || strings.EqualFold(evt.State, state) {
+			if state == AllStatesCode || strings.EqualFold(evt.State, state) {
 				filteredEvents = append(filteredEvents, evt)
 				break
 			}
@@ -1110,7 +1115,7 @@ Try /export-calendar with a different state, or check back later.`, strings.Join
 		}
 
 		filename := "vga-events.ics"
-		if len(filterStates) == 1 && filterStates[0] != "ALL" {
+		if len(filterStates) == 1 && filterStates[0] != AllStatesCode {
 			filename = fmt.Sprintf("vga-events-%s.ics", filterStates[0])
 		}
 
@@ -1317,7 +1322,7 @@ func showStateSelectionKeyboard() (string, *telegram.InlineKeyboardMarkup) {
 				{Text: "🗽 New York (NY)", CallbackData: "subscribe:NY"},
 			},
 			{
-				{Text: "🇺🇸 All States", CallbackData: "subscribe:ALL"},
+				{Text: "🇺🇸 All States", CallbackData: fmt.Sprintf("subscribe:%s", AllStatesCode)},
 			},
 		},
 	}

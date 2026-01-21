@@ -490,6 +490,7 @@ func TestGetEventsByStatus(t *testing.T) {
 	}
 }
 
+//nolint:dupl // Similar structure to TestIsValidState is intentional
 func TestIsValidEventStatus(t *testing.T) {
 	tests := []struct {
 		status string
