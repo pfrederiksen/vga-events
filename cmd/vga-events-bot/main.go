@@ -377,7 +377,7 @@ func handlePreviewCallback(prefs preferences.Preferences, callback *telegram.Cal
 			user := prefs.GetUser(callbackChatID)
 			currentStatus := user.GetEventStatus(evt.ID)
 			note := user.GetEventNote(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note)
+			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, callbackChatID, prefs)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}
@@ -466,7 +466,7 @@ Sorted by soonest first:`, len(eventsToSend), len(filteredEvents), strings.Join(
 			user := prefs.GetUser(chatID)
 			currentStatus := user.GetEventStatus(evt.ID)
 			note := user.GetEventNote(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note)
+			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, chatID, prefs)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}
@@ -909,6 +909,18 @@ Please provide a search keyword.
 	case "/check":
 		return handleCheck(chatID), nil
 
+	case "/invite":
+		return handleInvite(prefs, chatID), nil
+
+	case "/friends":
+		return handleFriends(prefs, chatID), nil
+
+	case "/join":
+		if len(parts) < 2 {
+			return "❌ Please provide an invite code.\n\nUsage: /join <invite_code>", nil
+		}
+		return handleJoin(prefs, chatID, parts[1], modified), nil
+
 	default:
 		return fmt.Sprintf("Unknown command: %s\n\nUse /help to see available commands.", command), nil
 	}
@@ -932,6 +944,9 @@ I help you track VGA Golf events in your favorite states!
 /stats - View your engagement statistics 📊
 /bulk - Bulk actions for multiple events 🔧
 /export-calendar - Download all events as .ics file 📅
+/invite - Get your friend invite code 👥
+/friends - View your friend list 👥
+/join - Join via friend invite code 👥
 /subscribe - Choose states with buttons (or /subscribe NV)
 /manage - Manage your subscriptions with buttons
 /settings - Configure notification preferences
@@ -954,6 +969,13 @@ Configure reminder timing with /reminders (1 day, 3 days, 1 week, or 2 weeks bef
 Manage multiple events at once with /bulk:
 • Clear all skipped events
 • Export all registered events to calendar
+
+<b>Friends &amp; Sharing:</b>
+Connect with golf buddies to coordinate events:
+• /invite - Get your invite code to share with friends
+• /join &lt;code&gt; - Add a friend using their invite code
+• /friends - View your friend list
+When both you and a friend enable sharing in /settings, you'll see when they're registered for events.
 
 <b>State Codes:</b>
 Use 2-letter state codes like NV, CA, TX, etc.
@@ -1178,6 +1200,125 @@ func handleStats(prefs preferences.Preferences, chatID, period string) string {
 	return msg.String()
 }
 
+// handleInvite displays the user's invite code
+func handleInvite(prefs preferences.Preferences, chatID string) string {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return "❌ Error: User not found"
+	}
+
+	inviteCode := user.GetInviteCode()
+
+	msg := fmt.Sprintf(`👥 <b>Invite Friends</b>
+
+Your invite code: <code>%s</code>
+
+<b>How it works:</b>
+1. Share your invite code with friends
+2. They send: /join %s
+3. You'll be connected as friends!
+
+<b>Privacy Note:</b>
+When you're friends with someone and both have sharing enabled (/settings), you can see when they're registered for the same events.
+
+Use /friends to see your current friends.`, inviteCode, inviteCode)
+
+	return msg
+}
+
+// handleFriends lists the user's friends
+func handleFriends(prefs preferences.Preferences, chatID string) string {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return "❌ Error: User not found"
+	}
+
+	if len(user.FriendChatIDs) == 0 {
+		return `👥 <b>Friends</b>
+
+You have no friends added yet.
+
+Use /invite to get your invite code and share it with friends!
+
+<b>Benefits of adding friends:</b>
+• See which events your friends are registered for
+• Coordinate golf outings together
+• Share events with your group
+
+Privacy is built-in: you control what you share via settings.`
+	}
+
+	msg := fmt.Sprintf(`👥 <b>Your Friends</b>
+
+You have <b>%d friend(s)</b>:
+
+`, len(user.FriendChatIDs))
+
+	for i, friendChatID := range user.FriendChatIDs {
+		msg += fmt.Sprintf("%d. User ID: <code>%s</code>\n", i+1, friendChatID)
+	}
+
+	msg += "\n<b>Sharing Status:</b> "
+	if user.ShareEvents {
+		msg += "✅ Enabled (friends can see your registered events)"
+	} else {
+		msg += "❌ Disabled (use /settings to enable)"
+	}
+
+	msg += "\n\nUse /invite to add more friends!"
+
+	return msg
+}
+
+// handleJoin processes a friend invite
+func handleJoin(prefs preferences.Preferences, chatID, inviteCode string, modified *bool) string {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return "❌ Error: User not found"
+	}
+
+	// Check if trying to add themselves
+	if user.GetInviteCode() == inviteCode {
+		return "❌ You can't add yourself as a friend!"
+	}
+
+	// Find the user with this invite code
+	var friendChatID string
+	for _, potentialFriendID := range prefs.GetAllUsers() {
+		potentialFriend := prefs.GetUser(potentialFriendID)
+		if potentialFriend.GetInviteCode() == inviteCode {
+			friendChatID = potentialFriendID
+			break
+		}
+	}
+
+	if friendChatID == "" {
+		return fmt.Sprintf("❌ Invalid invite code: <code>%s</code>\n\nMake sure you entered the code correctly.", inviteCode)
+	}
+
+	// Check if already friends
+	if user.IsFriend(friendChatID) {
+		return "ℹ️ You're already friends with this user!"
+	}
+
+	// Add friend (bidirectional)
+	user.AddFriend(friendChatID)
+	friend := prefs.GetUser(friendChatID)
+	friend.AddFriend(chatID)
+	*modified = true
+
+	return fmt.Sprintf(`✅ <b>Friend Added!</b>
+
+You're now connected with user <code>%s</code>
+
+<b>Next steps:</b>
+• Use /friends to see your friend list
+• Enable event sharing in /settings to see when they're registered for events
+• Use /my-events to coordinate attendance
+
+Both you and your friend need to enable sharing to see each other's event registrations.`, friendChatID)
+}
+
 // handleNear finds events near a specified city
 func handleNear(prefs preferences.Preferences, chatID, cityName, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
 	user := prefs.GetUser(chatID)
@@ -1243,7 +1384,7 @@ func handleNear(prefs preferences.Preferences, chatID, cityName, botToken string
 	for i, evt := range matchingEvents {
 		currentStatus := user.GetEventStatus(evt.ID)
 		note := user.GetEventNote(evt.ID)
-		msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note)
+		msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, chatID, prefs)
 
 		if !dryRun {
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
@@ -1397,7 +1538,7 @@ Showing first %d results:`, len(matchingEvents), keyword, len(eventsToSend))
 			user := prefs.GetUser(chatID)
 			currentStatus := user.GetEventStatus(evt.ID)
 			note := user.GetEventNote(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note)
+			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, chatID, prefs)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}
@@ -1634,7 +1775,7 @@ You have %d tracked event(s):`, totalEvents)
 			// Send each event with status buttons
 			for i, evt := range group {
 				note := user.GetEventNote(evt.ID)
-				msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, status, note)
+				msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, status, note, chatID, prefs)
 				if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 					fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 				}
@@ -1738,7 +1879,7 @@ Showing %d event(s), sorted by date:`, len(filteredEvents), strings.Join(states,
 		for i, evt := range eventsToSend {
 			currentStatus := user.GetEventStatus(evt.ID)
 			note := user.GetEventNote(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note)
+			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, chatID, prefs)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}

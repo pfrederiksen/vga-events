@@ -6,6 +6,7 @@ import (
 
 	"github.com/pfrederiksen/vga-events/internal/course"
 	"github.com/pfrederiksen/vga-events/internal/event"
+	"github.com/pfrederiksen/vga-events/internal/preferences"
 )
 
 // FormatEvent formats a single event as a Telegram message
@@ -87,12 +88,27 @@ func FormatEventWithCalendar(evt *event.Event) (string, *InlineKeyboardMarkup) {
 
 // FormatEventWithStatus formats an event message with status and calendar buttons
 func FormatEventWithStatus(evt *event.Event, currentStatus string) (string, *InlineKeyboardMarkup) {
-	return FormatEventWithStatusAndNote(evt, currentStatus, "")
+	return FormatEventWithStatusAndNote(evt, currentStatus, "", "", nil)
 }
 
-// FormatEventWithStatusAndNote formats an event message with status, note, and calendar buttons
-func FormatEventWithStatusAndNote(evt *event.Event, currentStatus, note string) (string, *InlineKeyboardMarkup) {
+// FormatEventWithStatusAndNote formats an event message with status, note, friend count, and calendar buttons
+func FormatEventWithStatusAndNote(evt *event.Event, currentStatus, note, chatID string, prefs preferences.Preferences) (string, *InlineKeyboardMarkup) {
 	text := FormatEventWithNote(evt, note)
+
+	// Add friend count if user has friends registered/interested in this event
+	if chatID != "" && prefs != nil {
+		friendIDs := prefs.GetFriendsForEvent(chatID, evt.ID)
+		if len(friendIDs) > 0 {
+			friendText := ""
+			if len(friendIDs) == 1 {
+				friendText = fmt.Sprintf("\n👥 <b>1 friend</b> registered for this event\n")
+			} else {
+				friendText = fmt.Sprintf("\n👥 <b>%d friends</b> registered for this event\n", len(friendIDs))
+			}
+			// Insert friend info after the course info and before the registration link
+			text = strings.Replace(text, "\n🔗 <a href=", friendText+"\n🔗 <a href=", 1)
+		}
+	}
 
 	// Add current status indicator to text if status is set
 	if currentStatus != "" {

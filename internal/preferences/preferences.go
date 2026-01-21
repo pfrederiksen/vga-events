@@ -623,6 +623,11 @@ func (u *UserPreferences) GetFriendCount() int {
 	return len(u.FriendChatIDs)
 }
 
+// GetInviteCode returns the user's invite code
+func (u *UserPreferences) GetInviteCode() string {
+	return u.InviteCode
+}
+
 // CreatePendingInvite creates a pending invite with a code
 func (u *UserPreferences) CreatePendingInvite() string {
 	return u.InviteCode
