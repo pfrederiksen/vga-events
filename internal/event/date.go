@@ -1,6 +1,9 @@
 package event
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // ParseDate attempts to parse event DateText into a time.Time.
 // Returns time.Time{} (zero value) if parsing fails.
@@ -94,4 +97,31 @@ func (e *Event) IsUpcoming() bool {
 		return true // Can't determine, include it
 	}
 	return parsed.After(time.Now())
+}
+
+// SortByDate sorts events by date (soonest first).
+// Events with unparseable dates are placed at the end.
+func SortByDate(events []*Event) {
+	sort.Slice(events, func(i, j int) bool {
+		dateI := ParseDate(events[i].DateText)
+		dateJ := ParseDate(events[j].DateText)
+
+		// If both dates are zero (unparseable), maintain current order
+		if dateI.IsZero() && dateJ.IsZero() {
+			return false
+		}
+
+		// If only i is zero, put it after j
+		if dateI.IsZero() {
+			return false
+		}
+
+		// If only j is zero, put i before j
+		if dateJ.IsZero() {
+			return true
+		}
+
+		// Both dates are valid, sort by date
+		return dateI.Before(dateJ)
+	})
 }
