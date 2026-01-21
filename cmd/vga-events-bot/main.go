@@ -510,6 +510,22 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 	case "unsubscribe":
 		responseText = handleUnsubscribe(prefs, chatID, param, modified)
 
+	case "unsubscribe-all":
+		if param == "confirm" {
+			user := prefs.GetUser(chatID)
+			states := user.States
+			count := len(states)
+			if count > 0 {
+				user.States = []string{}
+				*modified = true
+				responseText = fmt.Sprintf("✅ <b>Unsubscribed from all %d state(s)</b>\n\nYou will no longer receive event notifications.\n\nUse /subscribe &lt;STATE&gt; to start receiving notifications again.", count)
+			} else {
+				responseText = "ℹ️ You have no active subscriptions."
+			}
+		} else {
+			responseText = "❌ Invalid action"
+		}
+
 	case "manage":
 		responseText, keyboard = showManageSubscriptionsKeyboard(prefs, chatID)
 
@@ -773,7 +789,12 @@ func processCommand(prefs preferences.Preferences, chatID, text string, modified
 
 	case "/unsubscribe":
 		if len(parts) < 2 {
-			return "❌ Please specify a state code.\n\nUsage: /unsubscribe NV", nil
+			return "❌ Please specify a state code or 'all'.\n\nUsage: /unsubscribe NV\nUsage: /unsubscribe all", nil
+		}
+		arg := strings.ToLower(strings.TrimSpace(parts[1]))
+		if arg == "all" {
+			// Show confirmation keyboard
+			return handleUnsubscribeAllWithKeyboard(prefs, chatID, botToken, dryRun)
 		}
 		return handleUnsubscribe(prefs, chatID, parts[1], modified), nil
 
@@ -1599,6 +1620,36 @@ func handleManageWithKeyboard(prefs preferences.Preferences, chatID, botToken st
 // handleSettingsWithKeyboard shows the settings keyboard
 func handleSettingsWithKeyboard(prefs preferences.Preferences, chatID, botToken string, dryRun bool) (string, []*event.Event) {
 	text, keyboard := showSettingsKeyboard(prefs, chatID)
+
+	if !dryRun {
+		client, err := telegram.NewClient(botToken, chatID)
+		if err == nil {
+			if err := client.SendMessageWithKeyboard(text, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending keyboard: %v\n", err)
+			}
+			return "", nil // Already sent via keyboard
+		}
+	}
+
+	return text, nil
+}
+
+// handleUnsubscribeAllWithKeyboard shows the unsubscribe all confirmation keyboard
+func handleUnsubscribeAllWithKeyboard(prefs preferences.Preferences, chatID, botToken string, dryRun bool) (string, []*event.Event) {
+	states := prefs.GetStates(chatID)
+	if len(states) == 0 {
+		return "ℹ️ You have no active subscriptions.", nil
+	}
+
+	text := fmt.Sprintf("⚠️ Are you sure you want to unsubscribe from <b>all %d state(s)</b>?\n\nThis will remove: %s", len(states), strings.Join(states, ", "))
+	keyboard := &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
+			{
+				{Text: "✅ Yes, unsubscribe all", CallbackData: "unsubscribe-all:confirm"},
+				{Text: "❌ Cancel", CallbackData: "menu:main"},
+			},
+		},
+	}
 
 	if !dryRun {
 		client, err := telegram.NewClient(botToken, chatID)
