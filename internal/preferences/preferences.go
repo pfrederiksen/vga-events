@@ -53,6 +53,10 @@ type UserPreferences struct {
 	// Personal event notes
 	// Key: event.ID, Value: user's personal note
 	EventNotes map[string]string `json:"event_notes,omitempty"`
+
+	// Change notifications (v0.5.0 Enhancement #3)
+	// Whether to be notified when tracked events change (date, title, city)
+	NotifyOnChanges bool `json:"notify_on_changes,omitempty"` // Default: true
 }
 
 // Preferences maps chat IDs to user preferences
@@ -94,6 +98,10 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		if user.EventNotes == nil {
 			user.EventNotes = make(map[string]string)
 		}
+		// Migration: enable change notifications for existing users (if they have tracked events)
+		if !user.NotifyOnChanges && len(user.EventStatuses) > 0 {
+			user.NotifyOnChanges = true
+		}
 		// Note: HidePastEvents defaults to false (zero value) for backward compatibility
 		// Users can enable it via settings
 		return user
@@ -113,6 +121,7 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		EventStatuses:   make(map[string]string),
 		ReminderDays:    []int{}, // No reminders by default, user can configure
 		EventNotes:      make(map[string]string),
+		NotifyOnChanges: true, // New feature: notify about event changes
 	}
 	return p[chatID]
 }
