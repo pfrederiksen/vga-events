@@ -95,3 +95,19 @@ func (s *Storage) CreateSnapshotFromEvents(events []*event.Event, state string) 
 	snapshot := event.CreateSnapshot(events, time.Now().UTC().Format(time.RFC3339))
 	return s.SaveSnapshot(snapshot, state)
 }
+
+// GetEventByID retrieves an event by ID from the snapshot
+// It searches the "all" snapshot first, then falls back to state-specific snapshots
+func (s *Storage) GetEventByID(eventID string) (*event.Event, error) {
+	// Try loading the "all" snapshot first
+	snapshot, err := s.LoadSnapshot("all")
+	if err != nil {
+		return nil, fmt.Errorf("loading snapshot: %w", err)
+	}
+
+	if evt, exists := snapshot.Events[eventID]; exists {
+		return evt, nil
+	}
+
+	return nil, fmt.Errorf("event not found: %s", eventID)
+}

@@ -235,3 +235,111 @@ func TestEvent_IsUpcoming(t *testing.T) {
 
 	testBoolMethod(t, "IsUpcoming", tests, (*Event).IsUpcoming)
 }
+
+func TestSortByDate(t *testing.T) {
+	tests := []struct {
+		name      string
+		events    []*Event
+		wantOrder []string // Expected order of DateText values
+	}{
+		{
+			name:      "Empty slice",
+			events:    []*Event{},
+			wantOrder: []string{},
+		},
+		{
+			name: "Single event",
+			events: []*Event{
+				{DateText: "Mar 15 2026"},
+			},
+			wantOrder: []string{"Mar 15 2026"},
+		},
+		{
+			name: "Already sorted",
+			events: []*Event{
+				{DateText: "Jan 1 2026"},
+				{DateText: "Feb 1 2026"},
+				{DateText: "Mar 1 2026"},
+			},
+			wantOrder: []string{"Jan 1 2026", "Feb 1 2026", "Mar 1 2026"},
+		},
+		{
+			name: "Reverse order",
+			events: []*Event{
+				{DateText: "Dec 31 2026"},
+				{DateText: "Jun 15 2026"},
+				{DateText: "Jan 1 2026"},
+			},
+			wantOrder: []string{"Jan 1 2026", "Jun 15 2026", "Dec 31 2026"},
+		},
+		{
+			name: "Mixed formats",
+			events: []*Event{
+				{DateText: "4.4.26"},     // Apr 4, 2026
+				{DateText: "Jan 1 2026"}, // Jan 1, 2026
+				{DateText: "02/15/26"},   // Feb 15, 2026
+			},
+			wantOrder: []string{"Jan 1 2026", "02/15/26", "4.4.26"},
+		},
+		{
+			name: "Unparseable dates at end",
+			events: []*Event{
+				{DateText: "Mar 1 2026"},
+				{DateText: "not a date"},
+				{DateText: "Jan 1 2026"},
+				{DateText: "invalid"},
+			},
+			wantOrder: []string{"Jan 1 2026", "Mar 1 2026", "not a date", "invalid"},
+		},
+		{
+			name: "All unparseable dates",
+			events: []*Event{
+				{DateText: "invalid1"},
+				{DateText: "invalid2"},
+				{DateText: "invalid3"},
+			},
+			wantOrder: []string{"invalid1", "invalid2", "invalid3"}, // Maintain original order
+		},
+		{
+			name: "Empty dates mixed with valid",
+			events: []*Event{
+				{DateText: ""},
+				{DateText: "Mar 1 2026"},
+				{DateText: "Jan 1 2026"},
+				{DateText: ""},
+			},
+			wantOrder: []string{"Jan 1 2026", "Mar 1 2026", "", ""},
+		},
+		{
+			name: "Same dates",
+			events: []*Event{
+				{DateText: "Mar 15 2026"},
+				{DateText: "Jan 1 2026"},
+				{DateText: "Mar 15 2026"},
+			},
+			wantOrder: []string{"Jan 1 2026", "Mar 15 2026", "Mar 15 2026"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a copy to avoid modifying the test data
+			events := make([]*Event, len(tt.events))
+			copy(events, tt.events)
+
+			// Sort the events
+			SortByDate(events)
+
+			// Check the order
+			if len(events) != len(tt.wantOrder) {
+				t.Fatalf("SortByDate() resulted in %d events, want %d", len(events), len(tt.wantOrder))
+			}
+
+			for i, event := range events {
+				if event.DateText != tt.wantOrder[i] {
+					t.Errorf("SortByDate() at position %d = %q, want %q", i, event.DateText, tt.wantOrder[i])
+				}
+			}
+		})
+	}
+}
