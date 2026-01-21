@@ -38,6 +38,21 @@ func FormatEvent(evt *event.Event) string {
 	return msg.String()
 }
 
+// FormatEventWithCalendar formats an event message with a calendar download button
+func FormatEventWithCalendar(evt *event.Event) (string, *InlineKeyboardMarkup) {
+	text := FormatEvent(evt)
+
+	keyboard := &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "📅 Add to Calendar", CallbackData: fmt.Sprintf("calendar:%s", evt.ID)},
+			},
+		},
+	}
+
+	return text, keyboard
+}
+
 // FormatSummary creates a summary message for multiple events
 func FormatSummary(count int, states []string) string {
 	var msg strings.Builder

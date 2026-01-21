@@ -26,8 +26,9 @@ var (
 )
 
 type Update struct {
-	UpdateID int     `json:"update_id"`
-	Message  Message `json:"message"`
+	UpdateID      int                     `json:"update_id"`
+	Message       *Message                `json:"message,omitempty"`
+	CallbackQuery *telegram.CallbackQuery `json:"callback_query,omitempty"`
 }
 
 type Message struct {
@@ -161,18 +162,24 @@ func runLoop(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 
 		// Process each update
 		for _, update := range updates {
-			chatID := fmt.Sprintf("%d", update.Message.Chat.ID)
-			text := strings.TrimSpace(update.Message.Text)
+			if update.CallbackQuery != nil {
+				// Handle callback query (button press)
+				handleCallbackQuery(prefs, update.CallbackQuery, &prefsModified, botToken, dryRun)
+			} else if update.Message != nil {
+				// Handle text message
+				chatID := fmt.Sprintf("%d", update.Message.Chat.ID)
+				text := strings.TrimSpace(update.Message.Text)
 
-			fmt.Printf("Message from %s (chat %s): %s\n", update.Message.From.FirstName, chatID, text)
+				fmt.Printf("Message from %s (chat %s): %s\n", update.Message.From.FirstName, chatID, text)
 
-			// Parse command
-			response, initialEvents := processCommand(prefs, chatID, text, &prefsModified, botToken, dryRun)
+				// Parse command
+				response, initialEvents := processCommand(prefs, chatID, text, &prefsModified, botToken, dryRun)
 
-			// Send response and initial events
-			sendResponse(botToken, chatID, response, initialEvents, dryRun)
+				// Send response and initial events
+				sendResponse(botToken, chatID, response, initialEvents, dryRun)
+			}
 
-			// Update offset to mark this message as processed
+			// Update offset to mark this update as processed
 			if update.UpdateID >= offset {
 				offset = update.UpdateID + 1
 			}
@@ -219,16 +226,23 @@ func runOnce(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 		if update.UpdateID > maxUpdateID {
 			maxUpdateID = update.UpdateID
 		}
-		chatID := fmt.Sprintf("%d", update.Message.Chat.ID)
-		text := strings.TrimSpace(update.Message.Text)
 
-		fmt.Printf("Message from %s (chat %s): %s\n", update.Message.From.FirstName, chatID, text)
+		if update.CallbackQuery != nil {
+			// Handle callback query (button press)
+			handleCallbackQuery(prefs, update.CallbackQuery, &prefsModified, botToken, dryRun)
+		} else if update.Message != nil {
+			// Handle text message
+			chatID := fmt.Sprintf("%d", update.Message.Chat.ID)
+			text := strings.TrimSpace(update.Message.Text)
 
-		// Parse command
-		response, initialEvents := processCommand(prefs, chatID, text, &prefsModified, botToken, dryRun)
+			fmt.Printf("Message from %s (chat %s): %s\n", update.Message.From.FirstName, chatID, text)
 
-		// Send response and initial events
-		sendResponse(botToken, chatID, response, initialEvents, dryRun)
+			// Parse command
+			response, initialEvents := processCommand(prefs, chatID, text, &prefsModified, botToken, dryRun)
+
+			// Send response and initial events
+			sendResponse(botToken, chatID, response, initialEvents, dryRun)
+		}
 	}
 
 	// Save preferences if modified
@@ -260,6 +274,98 @@ func runOnce(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 	}
 }
 
+func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.CallbackQuery, modified *bool, botToken string, dryRun bool) {
+	chatID := fmt.Sprintf("%d", callback.From.ID)
+	messageID := 0
+	if callback.Message != nil {
+		messageID = callback.Message.MessageID
+	}
+
+	fmt.Printf("Callback from %s (chat %s): %s\n", callback.From.FirstName, chatID, callback.Data)
+
+	// Parse callback data (format: "action:param")
+	parts := strings.Split(callback.Data, ":")
+	if len(parts) == 0 {
+		return
+	}
+
+	action := parts[0]
+	var param string
+	if len(parts) > 1 {
+		param = parts[1]
+	}
+
+	var responseText string
+	var keyboard *telegram.InlineKeyboardMarkup
+
+	switch action {
+	case "subscribe":
+		if param != "" {
+			responseText, _ = handleSubscribe(prefs, chatID, param, modified, dryRun)
+		} else {
+			// Show state selection keyboard
+			responseText, keyboard = showStateSelectionKeyboard()
+		}
+
+	case "unsubscribe":
+		responseText = handleUnsubscribe(prefs, chatID, param, modified)
+
+	case "manage":
+		responseText, keyboard = showManageSubscriptionsKeyboard(prefs, chatID)
+
+	case "settings":
+		responseText, keyboard = showSettingsKeyboard(prefs, chatID)
+
+	case "digest":
+		if user := prefs.GetUser(chatID); user != nil {
+			if user.SetDigestFrequency(param) {
+				*modified = true
+				responseText = fmt.Sprintf("✅ Digest frequency updated to <b>%s</b>", param)
+			} else {
+				responseText = "❌ Invalid digest frequency"
+			}
+		}
+
+	case "calendar":
+		// Calendar download is handled differently - we need to fetch the event
+		// and send an .ics file. For now, inform user that feature is coming soon.
+		responseText = "📅 Calendar integration coming soon!\n\nFor now, please add events manually to your calendar."
+
+	default:
+		responseText = "Unknown action"
+	}
+
+	// Answer the callback query
+	if !dryRun {
+		client, err := telegram.NewClient(botToken, chatID)
+		if err == nil {
+			if err := client.AnswerCallbackQuery(callback.ID, "", false); err != nil {
+				fmt.Fprintf(os.Stderr, "Error answering callback: %v\n", err)
+			}
+
+			// Edit the message with new text and keyboard
+			if messageID > 0 {
+				if err := client.EditMessageText(chatID, messageID, responseText, keyboard); err != nil {
+					fmt.Fprintf(os.Stderr, "Error editing message: %v\n", err)
+				}
+			} else {
+				// If no message ID, send new message
+				var sendErr error
+				if keyboard != nil {
+					sendErr = client.SendMessageWithKeyboard(responseText, keyboard)
+				} else {
+					sendErr = client.SendMessage(responseText)
+				}
+				if sendErr != nil {
+					fmt.Fprintf(os.Stderr, "Error sending message: %v\n", err)
+				}
+			}
+		}
+	} else {
+		fmt.Printf("[DRY RUN] Would answer callback and update message:\n%s\n\n", responseText)
+	}
+}
+
 func processCommand(prefs preferences.Preferences, chatID, text string, modified *bool, botToken string, dryRun bool) (string, []*event.Event) {
 	parts := strings.Fields(text)
 	if len(parts) == 0 {
@@ -274,7 +380,8 @@ func processCommand(prefs preferences.Preferences, chatID, text string, modified
 
 	case "/subscribe":
 		if len(parts) < 2 {
-			return "❌ Please specify a state code.\n\nUsage: /subscribe NV", nil
+			// Show state selection keyboard
+			return handleSubscribeWithKeyboard(chatID, botToken, dryRun)
 		}
 		return handleSubscribe(prefs, chatID, parts[1], modified, dryRun)
 
@@ -286,6 +393,12 @@ func processCommand(prefs preferences.Preferences, chatID, text string, modified
 
 	case "/list":
 		return handleList(prefs, chatID), nil
+
+	case "/manage":
+		return handleManageWithKeyboard(prefs, chatID, botToken, dryRun)
+
+	case "/settings":
+		return handleSettingsWithKeyboard(prefs, chatID, botToken, dryRun)
 
 	case "/check":
 		return handleCheck(chatID), nil
@@ -302,16 +415,11 @@ I help you track VGA Golf events in your favorite states!
 
 <b>Commands:</b>
 
-/subscribe &lt;STATE&gt; - Subscribe to a state
-   Example: /subscribe NV
-
-/unsubscribe &lt;STATE&gt; - Unsubscribe from a state
-   Example: /unsubscribe CA
-
+/subscribe - Choose states with buttons (or /subscribe NV)
+/manage - Manage your subscriptions with buttons
+/settings - Configure notification preferences
 /list - Show your current subscriptions
-
 /check - Trigger an immediate check (experimental)
-
 /help - Show this help message
 
 <b>State Codes:</b>
@@ -319,7 +427,14 @@ Use 2-letter state codes like NV, CA, TX, etc.
 Use ALL to subscribe to all states.
 
 <b>Notifications:</b>
-You'll receive a message whenever new events are posted in your subscribed states. Checks run every hour.`
+You'll receive messages whenever new events are posted in your subscribed states.
+• <b>Immediate mode</b> - Get notified right away (default)
+• <b>Daily digest</b> - Receive a daily summary at 9 AM UTC
+• <b>Weekly digest</b> - Receive a weekly summary on Mondays
+
+Change your preferences with /settings
+
+Checks run every hour.`
 }
 
 func handleSubscribe(prefs preferences.Preferences, chatID, state string, modified *bool, dryRun bool) (string, []*event.Event) {
@@ -433,6 +548,146 @@ The bot checks for new events every hour automatically.
 If you're subscribed to any states, you'll receive notifications when new events are posted.
 
 Use /list to see your current subscriptions.`
+}
+
+// showStateSelectionKeyboard returns a keyboard with popular states
+func showStateSelectionKeyboard() (string, *telegram.InlineKeyboardMarkup) {
+	keyboard := &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
+			{
+				{Text: "🌴 California (CA)", CallbackData: "subscribe:CA"},
+				{Text: "🎰 Nevada (NV)", CallbackData: "subscribe:NV"},
+			},
+			{
+				{Text: "🤠 Texas (TX)", CallbackData: "subscribe:TX"},
+				{Text: "🌵 Arizona (AZ)", CallbackData: "subscribe:AZ"},
+			},
+			{
+				{Text: "🏖️ Florida (FL)", CallbackData: "subscribe:FL"},
+				{Text: "🗽 New York (NY)", CallbackData: "subscribe:NY"},
+			},
+			{
+				{Text: "🇺🇸 All States", CallbackData: "subscribe:ALL"},
+			},
+		},
+	}
+	return "📍 <b>Select a state to subscribe:</b>\n\nOr type: /subscribe STATE", keyboard
+}
+
+// showManageSubscriptionsKeyboard shows current subscriptions with unsubscribe buttons
+func showManageSubscriptionsKeyboard(prefs preferences.Preferences, chatID string) (string, *telegram.InlineKeyboardMarkup) {
+	states := prefs.GetStates(chatID)
+
+	if len(states) == 0 {
+		return `📋 <b>No Subscriptions</b>
+
+You have no active subscriptions.
+
+Use /subscribe to get started!`, nil
+	}
+
+	keyboard := &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{},
+	}
+
+	text := "📋 <b>Manage Subscriptions</b>\n\nTap to unsubscribe:\n"
+
+	for _, state := range states {
+		stateName := preferences.GetStateName(state)
+		keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, []telegram.InlineKeyboardButton{
+			{Text: fmt.Sprintf("✅ %s (%s)", stateName, state), CallbackData: fmt.Sprintf("unsubscribe:%s", state)},
+		})
+	}
+
+	// Add "Subscribe to more" button
+	keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, []telegram.InlineKeyboardButton{
+		{Text: "➕ Subscribe to more", CallbackData: "subscribe:"},
+	})
+
+	return text, keyboard
+}
+
+// showSettingsKeyboard shows user settings with digest options
+func showSettingsKeyboard(prefs preferences.Preferences, chatID string) (string, *telegram.InlineKeyboardMarkup) {
+	user := prefs.GetUser(chatID)
+
+	keyboard := &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
+			{
+				{Text: "📨 Immediate", CallbackData: "digest:immediate"},
+			},
+			{
+				{Text: "📅 Daily Digest", CallbackData: "digest:daily"},
+			},
+			{
+				{Text: "📆 Weekly Digest", CallbackData: "digest:weekly"},
+			},
+		},
+	}
+
+	text := fmt.Sprintf(`⚙️ <b>Settings</b>
+
+<b>Current digest frequency:</b> %s
+
+<b>Notification Mode:</b>
+• <b>Immediate</b> - Get notified as soon as new events are posted
+• <b>Daily</b> - Receive a daily digest at 9 AM UTC
+• <b>Weekly</b> - Receive a weekly digest on Mondays at 9 AM UTC
+
+Select your preferred mode:`, user.DigestFrequency)
+
+	return text, keyboard
+}
+
+// handleSubscribeWithKeyboard shows the subscription keyboard when /subscribe is called without args
+func handleSubscribeWithKeyboard(chatID, botToken string, dryRun bool) (string, []*event.Event) {
+	text, keyboard := showStateSelectionKeyboard()
+
+	if !dryRun {
+		client, err := telegram.NewClient(botToken, chatID)
+		if err == nil {
+			if err := client.SendMessageWithKeyboard(text, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending keyboard: %v\n", err)
+			}
+			return "", nil // Already sent via keyboard
+		}
+	}
+
+	return text, nil
+}
+
+// handleManageWithKeyboard shows the manage subscriptions keyboard
+func handleManageWithKeyboard(prefs preferences.Preferences, chatID, botToken string, dryRun bool) (string, []*event.Event) {
+	text, keyboard := showManageSubscriptionsKeyboard(prefs, chatID)
+
+	if keyboard != nil && !dryRun {
+		client, err := telegram.NewClient(botToken, chatID)
+		if err == nil {
+			if err := client.SendMessageWithKeyboard(text, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending keyboard: %v\n", err)
+			}
+			return "", nil // Already sent via keyboard
+		}
+	}
+
+	return text, nil
+}
+
+// handleSettingsWithKeyboard shows the settings keyboard
+func handleSettingsWithKeyboard(prefs preferences.Preferences, chatID, botToken string, dryRun bool) (string, []*event.Event) {
+	text, keyboard := showSettingsKeyboard(prefs, chatID)
+
+	if !dryRun {
+		client, err := telegram.NewClient(botToken, chatID)
+		if err == nil {
+			if err := client.SendMessageWithKeyboard(text, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending keyboard: %v\n", err)
+			}
+			return "", nil // Already sent via keyboard
+		}
+	}
+
+	return text, nil
 }
 
 func getUpdates(botToken string, offset int) ([]Update, error) {

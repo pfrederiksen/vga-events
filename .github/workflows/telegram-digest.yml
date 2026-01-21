@@ -1,0 +1,152 @@
+name: Telegram Digest Delivery
+
+on:
+  schedule:
+    # Daily digest at 9 AM UTC
+    - cron: '0 9 * * *'
+    # Weekly digest at 9 AM UTC on Mondays
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      frequency:
+        description: 'Digest frequency (daily or weekly)'
+        required: true
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - weekly
+
+permissions:
+  contents: read
+
+jobs:
+  send-daily-digest:
+    runs-on: ubuntu-latest
+    # Run only on daily schedule or manual trigger with daily
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 9 * * *') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.frequency == 'daily')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build telegram tool
+        run: go build -o vga-events-telegram ./cmd/vga-events-telegram
+
+      - name: Load preferences
+        id: prefs
+        env:
+          TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
+          TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
+        run: |
+          # Fetch preferences from Gist
+          curl -s -H "Authorization: token $TELEGRAM_GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/gists/$TELEGRAM_GIST_ID" | \
+            jq -r '.files["preferences.json"].content' > preferences.json
+
+          # Count users with pending daily digests
+          USER_COUNT=$(jq -r '
+            to_entries | map(
+              select(.value.active == true and
+                     .value.digest_frequency == "daily" and
+                     (.value.pending_events // [] | length) > 0)
+            ) | length
+          ' preferences.json)
+
+          echo "user_count=$USER_COUNT" >> $GITHUB_OUTPUT
+          echo "Found $USER_COUNT user(s) with pending daily digest events"
+
+      - name: Send daily digests
+        if: steps.prefs.outputs.user_count > 0
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
+          TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
+        run: |
+          chmod +x scripts/send-digest.sh
+          ./scripts/send-digest.sh daily
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.prefs.outputs.user_count }}" -gt 0 ]; then
+            echo "✅ Sent daily digests to ${{ steps.prefs.outputs.user_count }} user(s)"
+          else
+            echo "ℹ️ No users with pending daily digest events"
+          fi
+
+  send-weekly-digest:
+    runs-on: ubuntu-latest
+    # Run only on weekly schedule (Monday) or manual trigger with weekly
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 9 * * 1') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.frequency == 'weekly')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build telegram tool
+        run: go build -o vga-events-telegram ./cmd/vga-events-telegram
+
+      - name: Load preferences
+        id: prefs
+        env:
+          TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
+          TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
+        run: |
+          # Fetch preferences from Gist
+          curl -s -H "Authorization: token $TELEGRAM_GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/gists/$TELEGRAM_GIST_ID" | \
+            jq -r '.files["preferences.json"].content' > preferences.json
+
+          # Count users with pending weekly digests
+          USER_COUNT=$(jq -r '
+            to_entries | map(
+              select(.value.active == true and
+                     .value.digest_frequency == "weekly" and
+                     (.value.pending_events // [] | length) > 0)
+            ) | length
+          ' preferences.json)
+
+          echo "user_count=$USER_COUNT" >> $GITHUB_OUTPUT
+          echo "Found $USER_COUNT user(s) with pending weekly digest events"
+
+      - name: Send weekly digests
+        if: steps.prefs.outputs.user_count > 0
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
+          TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
+        run: |
+          chmod +x scripts/send-digest.sh
+          ./scripts/send-digest.sh weekly
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.prefs.outputs.user_count }}" -gt 0 ]; then
+            echo "✅ Sent weekly digests to ${{ steps.prefs.outputs.user_count }} user(s)"
+          else
+            echo "ℹ️ No users with pending weekly digest events"
+          fi
