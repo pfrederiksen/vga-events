@@ -175,6 +175,7 @@ func TestSelectChampionshipTee_FirstTeeWhenNoMatch(t *testing.T) {
 	}
 }
 
+//nolint:dupl // Test intentionally duplicates parsing logic to verify it
 func TestParseUSGACourseDetailsHTML(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -275,6 +276,7 @@ func TestParseUSGACourseDetailsHTML(t *testing.T) {
 	}
 }
 
+//nolint:dupl // Test intentionally duplicates parsing logic to verify edge cases
 func TestParseUSGACourseDetailsEdgeCases(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -282,13 +284,13 @@ func TestParseUSGACourseDetailsEdgeCases(t *testing.T) {
 		wantTeeCount int
 	}{
 		{
-			name: "incomplete row (missing rating)",
-			html: `<tr><td>Blue</td><td>72</td><td>6500</td><td>135</td></tr>`,
+			name:         "incomplete row (missing rating)",
+			html:         `<tr><td>Blue</td><td>72</td><td>6500</td><td>135</td></tr>`,
 			wantTeeCount: 0, // Should skip incomplete rows
 		},
 		{
-			name: "zero values",
-			html: `<tr><td>Red</td><td>0</td><td>0</td><td>120</td><td>68.5</td></tr>`,
+			name:         "zero values",
+			html:         `<tr><td>Red</td><td>0</td><td>0</td><td>120</td><td>68.5</td></tr>`,
 			wantTeeCount: 0, // Should skip rows with par=0 or yardage=0
 		},
 		{
@@ -300,8 +302,8 @@ func TestParseUSGACourseDetailsEdgeCases(t *testing.T) {
 			wantTeeCount: 2,
 		},
 		{
-			name: "non-numeric values",
-			html: `<tr><td>White</td><td>N/A</td><td>6000</td><td>130</td><td>70.0</td></tr>`,
+			name:         "non-numeric values",
+			html:         `<tr><td>White</td><td>N/A</td><td>6000</td><td>130</td><td>70.0</td></tr>`,
 			wantTeeCount: 0, // Should skip rows with non-numeric values
 		},
 	}

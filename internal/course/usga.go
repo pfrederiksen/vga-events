@@ -211,6 +211,7 @@ func (c *USGAClient) getCourseDetails(courseID string) (*USGACourseDetails, erro
 	teeRowRe := regexp.MustCompile(`(?i)<tr[^>]*>.*?<td[^>]*>([^<]+)</td>.*?<td[^>]*>(\d+)</td>.*?<td[^>]*>(\d+)</td>.*?<td[^>]*>(\d+)</td>.*?<td[^>]*>([\d.]+)</td>`)
 
 	matches := teeRowRe.FindAllStringSubmatch(htmlContent, -1)
+	//nolint:dupl // Parsing logic duplicated in tests for verification
 	for _, match := range matches {
 		if len(match) >= 6 {
 			teeColor := strings.TrimSpace(match[1])
