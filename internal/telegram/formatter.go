@@ -4,15 +4,26 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/pfrederiksen/vga-events/internal/course"
 	"github.com/pfrederiksen/vga-events/internal/event"
+	"github.com/pfrederiksen/vga-events/internal/preferences"
 )
 
 // FormatEvent formats a single event as a Telegram message
 func FormatEvent(evt *event.Event) string {
+	return FormatEventWithNote(evt, "")
+}
+
+// FormatEventWithNote formats an event with an optional note
+func FormatEventWithNote(evt *event.Event, note string) string {
 	var msg strings.Builder
 
-	// Header with emoji
-	msg.WriteString("🏌️ <b>New VGA Golf Event!</b>\n\n")
+	// Header with emoji (include 📝 if note exists)
+	if note != "" {
+		msg.WriteString("🏌️ 📝 <b>New VGA Golf Event!</b>\n\n")
+	} else {
+		msg.WriteString("🏌️ <b>New VGA Golf Event!</b>\n\n")
+	}
 
 	// State and course
 	msg.WriteString(fmt.Sprintf("📍 <b>%s</b> - %s\n", evt.State, evt.Title))
@@ -26,6 +37,27 @@ func FormatEvent(evt *event.Event) string {
 	// City (if available)
 	if evt.City != "" {
 		msg.WriteString(fmt.Sprintf("🏢 %s\n", evt.City))
+	}
+
+	// Course info (if available)
+	if courseInfo := course.LookupCourse(evt.Title, evt.State); courseInfo != nil {
+		msg.WriteString("\n")
+		msg.WriteString(fmt.Sprintf("🏌️ Par %d | %s yards", courseInfo.Par, formatYardage(courseInfo.Yardage)))
+		if courseInfo.Slope > 0 {
+			msg.WriteString(fmt.Sprintf(" | Slope %d", courseInfo.Slope))
+		}
+		msg.WriteString("\n")
+		if courseInfo.Rating > 0 {
+			msg.WriteString(fmt.Sprintf("⭐ Rating: %.1f\n", courseInfo.Rating))
+		}
+		if courseInfo.Website != "" {
+			msg.WriteString(fmt.Sprintf("🌐 %s\n", courseInfo.Website))
+		}
+	}
+
+	// Note (if available)
+	if note != "" {
+		msg.WriteString(fmt.Sprintf("\n📝 <i>%s</i>\n", note))
 	}
 
 	// Registration link
@@ -56,7 +88,27 @@ func FormatEventWithCalendar(evt *event.Event) (string, *InlineKeyboardMarkup) {
 
 // FormatEventWithStatus formats an event message with status and calendar buttons
 func FormatEventWithStatus(evt *event.Event, currentStatus string) (string, *InlineKeyboardMarkup) {
-	text := FormatEvent(evt)
+	return FormatEventWithStatusAndNote(evt, currentStatus, "", "", nil)
+}
+
+// FormatEventWithStatusAndNote formats an event message with status, note, friend count, and calendar buttons
+func FormatEventWithStatusAndNote(evt *event.Event, currentStatus, note, chatID string, prefs preferences.Preferences) (string, *InlineKeyboardMarkup) {
+	text := FormatEventWithNote(evt, note)
+
+	// Add friend count if user has friends registered/interested in this event
+	if chatID != "" && prefs != nil {
+		friendIDs := prefs.GetFriendsForEvent(chatID, evt.ID)
+		if len(friendIDs) > 0 {
+			friendText := ""
+			if len(friendIDs) == 1 {
+				friendText = "\n👥 <b>1 friend</b> registered for this event\n"
+			} else {
+				friendText = fmt.Sprintf("\n👥 <b>%d friends</b> registered for this event\n", len(friendIDs))
+			}
+			// Insert friend info after the course info and before the registration link
+			text = strings.Replace(text, "\n🔗 <a href=", friendText+"\n🔗 <a href=", 1)
+		}
+	}
 
 	// Add current status indicator to text if status is set
 	if currentStatus != "" {
@@ -181,4 +233,98 @@ func FormatReminder(evt *event.Event, daysUntil int) (string, *InlineKeyboardMar
 	}
 
 	return msg.String(), keyboard
+}
+
+// FormatEventChange formats an event change notification
+func FormatEventChange(evt *event.Event, changeType, oldValue, newValue string) string {
+	var msg strings.Builder
+
+	msg.WriteString("⚠️ <b>Event Updated!</b>\n\n")
+	msg.WriteString(fmt.Sprintf("📍 <b>%s</b> - %s\n\n", evt.State, evt.Title))
+
+	// Show what changed
+	switch changeType {
+	case "date":
+		msg.WriteString("📅 <b>Date Changed:</b>\n")
+		if oldValue != "" {
+			msg.WriteString(fmt.Sprintf("  ❌ <s>%s</s>\n", oldValue))
+		} else {
+			msg.WriteString("  ❌ <s>No date</s>\n")
+		}
+		if newValue != "" {
+			niceDate := event.FormatDateNice(newValue)
+			msg.WriteString(fmt.Sprintf("  ✅ %s\n", niceDate))
+		} else {
+			msg.WriteString("  ✅ No date\n")
+		}
+	case "title":
+		msg.WriteString("🏌️ <b>Title Changed:</b>\n")
+		msg.WriteString(fmt.Sprintf("  ❌ <s>%s</s>\n", oldValue))
+		msg.WriteString(fmt.Sprintf("  ✅ %s\n", newValue))
+	case "city":
+		msg.WriteString("🏢 <b>City Changed:</b>\n")
+		if oldValue != "" {
+			msg.WriteString(fmt.Sprintf("  ❌ <s>%s</s>\n", oldValue))
+		} else {
+			msg.WriteString("  ❌ <s>No city</s>\n")
+		}
+		if newValue != "" {
+			msg.WriteString(fmt.Sprintf("  ✅ %s\n", newValue))
+		} else {
+			msg.WriteString("  ✅ No city\n")
+		}
+	}
+
+	msg.WriteString("\n🔗 <a href=\"https://vgagolf.org/state-events\">vgagolf.org/state-events</a>\n")
+	msg.WriteString("<i>(login required)</i>\n")
+
+	return msg.String()
+}
+
+// FormatEventChangeWithKeyboard formats an event change with interactive buttons
+func FormatEventChangeWithKeyboard(evt *event.Event, changeType, oldValue, newValue string, currentStatus string) (string, *InlineKeyboardMarkup) {
+	text := FormatEventChange(evt, changeType, oldValue, newValue)
+
+	// Add current status indicator if set
+	if currentStatus != "" {
+		statusEmoji := ""
+		statusText := ""
+		switch currentStatus {
+		case "interested":
+			statusEmoji = "⭐"
+			statusText = "You marked this as Interested"
+		case "registered":
+			statusEmoji = "✅"
+			statusText = "You're Registered for this event"
+		case "maybe":
+			statusEmoji = "🤔"
+			statusText = "You marked this as Maybe"
+		}
+		if statusEmoji != "" {
+			text = fmt.Sprintf("%s\n\n%s <i>%s</i>", text, statusEmoji, statusText)
+		}
+	}
+
+	keyboard := &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "📅 Update Calendar", CallbackData: fmt.Sprintf("calendar:%s", evt.ID)},
+			},
+			{
+				{Text: "✅ Acknowledged", CallbackData: fmt.Sprintf("ack-change:%s", evt.ID)},
+			},
+		},
+	}
+
+	return text, keyboard
+}
+
+// formatYardage formats yardage with comma separators for readability
+func formatYardage(yardage int) string {
+	if yardage < 1000 {
+		return fmt.Sprintf("%d", yardage)
+	}
+	thousands := yardage / 1000
+	remainder := yardage % 1000
+	return fmt.Sprintf("%d,%03d", thousands, remainder)
 }

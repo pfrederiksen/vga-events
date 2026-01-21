@@ -24,6 +24,7 @@ const (
 	// Error messages
 	errFetchingEvents      = "❌ Error fetching events. Please try again later."
 	errSendingCalendarFile = "❌ Error sending calendar file"
+	errUserNotFound        = "❌ Error: User not found"
 )
 
 var (
@@ -37,6 +38,8 @@ var (
 	digest     = flag.String("digest", "", "Send digest to specific chat ID (used by GitHub Actions)")
 	digestFile = flag.String("digest-file", "", "Path to digest events JSON file")
 	digestType = flag.String("digest-type", "daily", "Type of digest: daily or weekly")
+	// Stats rollover flag
+	archiveWeeklyStats = flag.Bool("archive-weekly-stats", false, "Archive current week's stats to history for all users")
 )
 
 type Update struct {
@@ -104,6 +107,12 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading preferences: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Archive weekly stats mode: archive stats and exit
+	if *archiveWeeklyStats {
+		archiveWeeklyStatsForAllUsers(prefs, storage)
+		os.Exit(0)
 	}
 
 	fmt.Printf("Loaded preferences for %d users\n", len(prefs))
@@ -368,7 +377,8 @@ func handlePreviewCallback(prefs preferences.Preferences, callback *telegram.Cal
 		for i, evt := range eventsToSend {
 			user := prefs.GetUser(callbackChatID)
 			currentStatus := user.GetEventStatus(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatus(evt, currentStatus)
+			note := user.GetEventNote(evt.ID)
+			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, callbackChatID, prefs)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}
@@ -456,7 +466,8 @@ Sorted by soonest first:`, len(eventsToSend), len(filteredEvents), strings.Join(
 		for i, evt := range eventsToSend {
 			user := prefs.GetUser(chatID)
 			currentStatus := user.GetEventStatus(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatus(evt, currentStatus)
+			note := user.GetEventNote(evt.ID)
+			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, chatID, prefs)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}
@@ -510,6 +521,22 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 	case "unsubscribe":
 		responseText = handleUnsubscribe(prefs, chatID, param, modified)
 
+	case "unsubscribe-all":
+		if param == "confirm" {
+			user := prefs.GetUser(chatID)
+			states := user.States
+			count := len(states)
+			if count > 0 {
+				user.States = []string{}
+				*modified = true
+				responseText = fmt.Sprintf("✅ <b>Unsubscribed from all %d state(s)</b>\n\nYou will no longer receive event notifications.\n\nUse /subscribe &lt;STATE&gt; to start receiving notifications again.", count)
+			} else {
+				responseText = "ℹ️ You have no active subscriptions."
+			}
+		} else {
+			responseText = "❌ Invalid action"
+		}
+
 	case "manage":
 		responseText, keyboard = showManageSubscriptionsKeyboard(prefs, chatID)
 
@@ -535,9 +562,9 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 		case "main":
 			responseText, keyboard = showMenuKeyboard()
 		case "all-events":
-			responseText, _ = handleAllEvents(prefs, chatID, botToken, dryRun)
+			responseText, _ = handleAllEvents(prefs, chatID, botToken, dryRun, modified)
 		case "my-events":
-			responseText, _ = handleMyEvents(prefs, chatID, botToken, dryRun)
+			responseText, _ = handleMyEvents(prefs, chatID, botToken, dryRun, modified)
 		case "upcoming":
 			responseText = handleUpcomingEventsCallback(prefs, chatID, botToken, dryRun)
 		case "reminders":
@@ -572,6 +599,9 @@ Example:
 		user := prefs.GetUser(chatID)
 		if user.SetEventStatus(eventID, status) {
 			*modified = true
+
+			// Track stats: event marked with status
+			user.IncrementEventStatus(status)
 
 			// Get status emoji and text
 			statusEmoji := ""
@@ -717,6 +747,11 @@ Example:
 		// Format: bulk:ACTION (e.g., "bulk:clear-skipped", "bulk:export-registered")
 		responseText, keyboard = handleBulkCallback(prefs, chatID, param, modified, botToken, dryRun)
 
+	case "ack-change":
+		// Acknowledge event change notification
+		// Format: ack-change:EVENT_ID
+		responseText = "✅ Change acknowledged. You can update your calendar if needed."
+
 	default:
 		responseText = "Unknown action"
 	}
@@ -752,6 +787,7 @@ Example:
 	}
 }
 
+//nolint:gocyclo // Command dispatcher naturally has high complexity due to many cases
 func processCommand(prefs preferences.Preferences, chatID, text string, modified *bool, botToken string, dryRun bool) (string, []*event.Event) {
 	parts := strings.Fields(text)
 	if len(parts) == 0 {
@@ -773,7 +809,12 @@ func processCommand(prefs preferences.Preferences, chatID, text string, modified
 
 	case "/unsubscribe":
 		if len(parts) < 2 {
-			return "❌ Please specify a state code.\n\nUsage: /unsubscribe NV", nil
+			return "❌ Please specify a state code or 'all'.\n\nUsage: /unsubscribe NV\nUsage: /unsubscribe all", nil
+		}
+		arg := strings.ToLower(strings.TrimSpace(parts[1]))
+		if arg == "all" {
+			// Show confirmation keyboard
+			return handleUnsubscribeAllWithKeyboard(prefs, chatID, botToken, dryRun)
 		}
 		return handleUnsubscribe(prefs, chatID, parts[1], modified), nil
 
@@ -805,7 +846,7 @@ Please provide a search keyword.
 		}
 		keyword := strings.Join(parts[1:], " ")
 		keyword = strings.Trim(keyword, `"'`) // Remove quotes if present
-		return handleSearch(prefs, chatID, keyword, botToken, dryRun)
+		return handleSearch(prefs, chatID, keyword, botToken, dryRun, modified)
 
 	case "/export-calendar":
 		// Optional parameter: state code
@@ -816,10 +857,42 @@ Please provide a search keyword.
 		return handleExportCalendar(prefs, chatID, stateFilter, botToken, dryRun)
 
 	case "/my-events":
-		return handleMyEvents(prefs, chatID, botToken, dryRun)
+		return handleMyEvents(prefs, chatID, botToken, dryRun, modified)
 
 	case "/events":
-		return handleAllEvents(prefs, chatID, botToken, dryRun)
+		return handleAllEvents(prefs, chatID, botToken, dryRun, modified)
+
+	case "/note":
+		if len(parts) < 2 {
+			return "❌ Please specify an event ID.\n\nUsage: /note &lt;event_id&gt; &lt;note_text&gt;\nUsage: /note &lt;event_id&gt; clear", nil
+		}
+		eventID := parts[1]
+
+		// Check if second param is "clear"
+		if len(parts) >= 3 && strings.ToLower(parts[2]) == "clear" {
+			return handleRemoveNote(prefs, chatID, eventID, modified)
+		}
+
+		// Need note text
+		if len(parts) < 3 {
+			return "❌ Please provide note text.\n\nUsage: /note &lt;event_id&gt; &lt;note_text&gt;", nil
+		}
+
+		// Join remaining parts as note text
+		noteText := strings.Join(parts[2:], " ")
+		return handleAddNote(prefs, chatID, eventID, noteText, modified)
+
+	case "/notes":
+		return handleListNotes(prefs, chatID, botToken, dryRun)
+
+	case "/near":
+		if len(parts) < 2 {
+			return "❌ Please specify a city name.\n\nUsage: /near &lt;city&gt;\n\nExamples:\n/near Las Vegas\n/near \"San Diego\"", nil
+		}
+		// Join remaining parts as city name (supports multi-word cities)
+		cityName := strings.Join(parts[1:], " ")
+		cityName = strings.Trim(cityName, `"'`) // Remove quotes if present
+		return handleNear(prefs, chatID, cityName, botToken, dryRun, modified)
 
 	case "/reminders":
 		return handleRemindersWithKeyboard(prefs, chatID, botToken, dryRun)
@@ -827,8 +900,28 @@ Please provide a search keyword.
 	case "/bulk":
 		return handleBulkWithKeyboard(prefs, chatID, botToken, dryRun)
 
+	case "/stats":
+		// Optional parameter: week, month, all
+		period := "week"
+		if len(parts) >= 2 {
+			period = strings.ToLower(parts[1])
+		}
+		return handleStats(prefs, chatID, period), nil
+
 	case "/check":
 		return handleCheck(chatID), nil
+
+	case "/invite":
+		return handleInvite(prefs, chatID), nil
+
+	case "/friends":
+		return handleFriends(prefs, chatID), nil
+
+	case "/join":
+		if len(parts) < 2 {
+			return "❌ Please provide an invite code.\n\nUsage: /join <invite_code>", nil
+		}
+		return handleJoin(prefs, chatID, parts[1], modified), nil
 
 	default:
 		return fmt.Sprintf("Unknown command: %s\n\nUse /help to see available commands.", command), nil
@@ -844,11 +937,18 @@ I help you track VGA Golf events in your favorite states!
 
 /menu - Quick actions menu 🎯
 /search - Search for events by keyword 🔍
+/near - Find events near a city 📍
 /events - View all events for your subscribed states 📅
 /my-events - View your tracked events ⭐
+/note - Add a note to an event 📝
+/notes - List all events with notes 📋
 /reminders - Configure event reminders 🔔
+/stats - View your engagement statistics 📊
 /bulk - Bulk actions for multiple events 🔧
 /export-calendar - Download all events as .ics file 📅
+/invite - Get your friend invite code 👥
+/friends - View your friend list 👥
+/join - Join via friend invite code 👥
 /subscribe - Choose states with buttons (or /subscribe NV)
 /manage - Manage your subscriptions with buttons
 /settings - Configure notification preferences
@@ -871,6 +971,13 @@ Configure reminder timing with /reminders (1 day, 3 days, 1 week, or 2 weeks bef
 Manage multiple events at once with /bulk:
 • Clear all skipped events
 • Export all registered events to calendar
+
+<b>Friends &amp; Sharing:</b>
+Connect with golf buddies to coordinate events:
+• /invite - Get your invite code to share with friends
+• /join &lt;code&gt; - Add a friend using their invite code
+• /friends - View your friend list
+When both you and a friend enable sharing in /settings, you'll see when they're registered for events.
 
 <b>State Codes:</b>
 Use 2-letter state codes like NV, CA, TX, etc.
@@ -987,6 +1094,346 @@ func handleUnsubscribe(prefs preferences.Preferences, chatID, state string, modi
 	return response
 }
 
+// handleAddNote adds or updates a note for an event
+func handleAddNote(prefs preferences.Preferences, chatID, eventID, noteText string, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return errUserNotFound, nil
+	}
+
+	user.SetEventNote(eventID, noteText)
+	*modified = true
+
+	return fmt.Sprintf("📝 Note added for event <code>%s</code>:\n\n<i>%s</i>", eventID, noteText), nil
+}
+
+// handleRemoveNote removes a note from an event
+func handleRemoveNote(prefs preferences.Preferences, chatID, eventID string, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return errUserNotFound, nil
+	}
+
+	// Check if note exists
+	if user.GetEventNote(eventID) == "" {
+		return fmt.Sprintf("ℹ️ No note found for event <code>%s</code>", eventID), nil
+	}
+
+	user.RemoveEventNote(eventID)
+	*modified = true
+
+	return fmt.Sprintf("✅ Note removed for event <code>%s</code>", eventID), nil
+}
+
+// handleStats displays user engagement statistics
+func handleStats(prefs preferences.Preferences, chatID, period string) string {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return errUserNotFound
+	}
+
+	if !user.EnableStats {
+		return "📊 Statistics tracking is disabled.\n\nStats help you track your VGA Golf engagement!"
+	}
+
+	var stats *preferences.WeeklyStats
+	var periodName string
+
+	switch period {
+	case "week", "":
+		stats = user.WeeklyStats
+		periodName = "This Week"
+	case "all":
+		stats = user.GetAllTimeStats()
+		periodName = "All Time"
+	default:
+		return "❌ Invalid period. Use: /stats, /stats week, or /stats all"
+	}
+
+	if stats == nil {
+		return "📊 No statistics available yet.\n\nStart viewing events to track your activity!"
+	}
+
+	var msg strings.Builder
+	msg.WriteString(fmt.Sprintf("📊 <b>Your VGA Golf Stats (%s)</b>\n\n", periodName))
+
+	// Events viewed
+	msg.WriteString(fmt.Sprintf("📅 <b>Events Viewed:</b> %d\n", stats.EventsViewed))
+
+	// Events marked by status
+	if len(stats.EventsMarked) > 0 {
+		msg.WriteString("\n<b>Events Marked:</b>\n")
+		if count, ok := stats.EventsMarked[preferences.EventStatusInterested]; ok && count > 0 {
+			msg.WriteString(fmt.Sprintf("  ⭐ Interested: %d\n", count))
+		}
+		if count, ok := stats.EventsMarked[preferences.EventStatusRegistered]; ok && count > 0 {
+			msg.WriteString(fmt.Sprintf("  ✅ Registered: %d\n", count))
+		}
+		if count, ok := stats.EventsMarked[preferences.EventStatusMaybe]; ok && count > 0 {
+			msg.WriteString(fmt.Sprintf("  🤔 Maybe: %d\n", count))
+		}
+		if count, ok := stats.EventsMarked[preferences.EventStatusSkip]; ok && count > 0 {
+			msg.WriteString(fmt.Sprintf("  ❌ Skipped: %d\n", count))
+		}
+	}
+
+	// Total marked
+	totalMarked := 0
+	for _, count := range stats.EventsMarked {
+		totalMarked += count
+	}
+	if totalMarked > 0 {
+		msg.WriteString(fmt.Sprintf("\n<b>Total Actions:</b> %d\n", totalMarked))
+	}
+
+	// Show history count for week view
+	if period == "week" || period == "" {
+		msg.WriteString(fmt.Sprintf("\n<i>Week started: %s</i>\n", stats.WeekStart.Format("Jan 2, 2006")))
+		if len(user.StatsHistory) > 0 {
+			msg.WriteString(fmt.Sprintf("\n📈 <b>%d week(s)</b> of history available\n", len(user.StatsHistory)))
+			msg.WriteString("Use /stats all to see all-time stats")
+		}
+	} else {
+		// All-time view
+		weekCount := len(user.StatsHistory) + 1 // +1 for current week
+		msg.WriteString(fmt.Sprintf("\n<i>Tracking for %d week(s)</i>", weekCount))
+	}
+
+	return msg.String()
+}
+
+// handleInvite displays the user's invite code
+func handleInvite(prefs preferences.Preferences, chatID string) string {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return errUserNotFound
+	}
+
+	inviteCode := user.GetInviteCode()
+
+	msg := fmt.Sprintf(`👥 <b>Invite Friends</b>
+
+Your invite code: <code>%s</code>
+
+<b>How it works:</b>
+1. Share your invite code with friends
+2. They send: /join %s
+3. You'll be connected as friends!
+
+<b>Privacy Note:</b>
+When you're friends with someone and both have sharing enabled (/settings), you can see when they're registered for the same events.
+
+Use /friends to see your current friends.`, inviteCode, inviteCode)
+
+	return msg
+}
+
+// handleFriends lists the user's friends
+func handleFriends(prefs preferences.Preferences, chatID string) string {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return errUserNotFound
+	}
+
+	if len(user.FriendChatIDs) == 0 {
+		return `👥 <b>Friends</b>
+
+You have no friends added yet.
+
+Use /invite to get your invite code and share it with friends!
+
+<b>Benefits of adding friends:</b>
+• See which events your friends are registered for
+• Coordinate golf outings together
+• Share events with your group
+
+Privacy is built-in: you control what you share via settings.`
+	}
+
+	msg := fmt.Sprintf(`👥 <b>Your Friends</b>
+
+You have <b>%d friend(s)</b>:
+
+`, len(user.FriendChatIDs))
+
+	for i, friendChatID := range user.FriendChatIDs {
+		msg += fmt.Sprintf("%d. User ID: <code>%s</code>\n", i+1, friendChatID)
+	}
+
+	msg += "\n<b>Sharing Status:</b> "
+	if user.ShareEvents {
+		msg += "✅ Enabled (friends can see your registered events)"
+	} else {
+		msg += "❌ Disabled (use /settings to enable)"
+	}
+
+	msg += "\n\nUse /invite to add more friends!"
+
+	return msg
+}
+
+// handleJoin processes a friend invite
+func handleJoin(prefs preferences.Preferences, chatID, inviteCode string, modified *bool) string {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return errUserNotFound
+	}
+
+	// Check if trying to add themselves
+	if user.GetInviteCode() == inviteCode {
+		return "❌ You can't add yourself as a friend!"
+	}
+
+	// Find the user with this invite code
+	var friendChatID string
+	for _, potentialFriendID := range prefs.GetAllUsers() {
+		potentialFriend := prefs.GetUser(potentialFriendID)
+		if potentialFriend.GetInviteCode() == inviteCode {
+			friendChatID = potentialFriendID
+			break
+		}
+	}
+
+	if friendChatID == "" {
+		return fmt.Sprintf("❌ Invalid invite code: <code>%s</code>\n\nMake sure you entered the code correctly.", inviteCode)
+	}
+
+	// Check if already friends
+	if user.IsFriend(friendChatID) {
+		return "ℹ️ You're already friends with this user!"
+	}
+
+	// Add friend (bidirectional)
+	user.AddFriend(friendChatID)
+	friend := prefs.GetUser(friendChatID)
+	friend.AddFriend(chatID)
+	*modified = true
+
+	return fmt.Sprintf(`✅ <b>Friend Added!</b>
+
+You're now connected with user <code>%s</code>
+
+<b>Next steps:</b>
+• Use /friends to see your friend list
+• Enable event sharing in /settings to see when they're registered for events
+• Use /my-events to coordinate attendance
+
+Both you and your friend need to enable sharing to see each other's event registrations.`, friendChatID)
+}
+
+// handleNear finds events near a specified city
+func handleNear(prefs preferences.Preferences, chatID, cityName, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+	if len(user.States) == 0 {
+		return "ℹ️ You need to subscribe to at least one state first.\n\nUse /subscribe &lt;STATE&gt; to get started.", nil
+	}
+
+	// Fetch current events
+	sc := scraper.New()
+	allEvents, err := sc.FetchEvents()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
+		return "❌ Error fetching events. Please try again later.", nil
+	}
+
+	// Filter events by subscribed states first
+	var subscribedEvents []*event.Event
+	for _, evt := range allEvents {
+		for _, state := range user.States {
+			if evt.State == state {
+				subscribedEvents = append(subscribedEvents, evt)
+				break
+			}
+		}
+	}
+
+	// Filter by city (case-insensitive substring match)
+	normalizedCity := strings.ToLower(strings.TrimSpace(cityName))
+	var matchingEvents []*event.Event
+	for _, evt := range subscribedEvents {
+		if strings.Contains(strings.ToLower(evt.City), normalizedCity) {
+			// Apply user's date filter if enabled
+			if user.DaysAhead > 0 && !evt.IsWithinDays(user.DaysAhead) {
+				continue
+			}
+			// Filter past events if enabled
+			if user.HidePastEvents && evt.IsPastEvent() {
+				continue
+			}
+			matchingEvents = append(matchingEvents, evt)
+		}
+	}
+
+	if len(matchingEvents) == 0 {
+		return fmt.Sprintf("📍 No events found near <b>%s</b> in your subscribed states.\n\nTry a different city name or check your subscriptions with /list", cityName), nil
+	}
+
+	// Sort by date
+	event.SortByDate(matchingEvents)
+
+	// Send header
+	client, err := telegram.NewClient(botToken, chatID)
+	if err != nil {
+		return fmt.Sprintf("📍 <b>Events near %s</b>\n\nFound %d event(s)", cityName, len(matchingEvents)), nil
+	}
+
+	headerMsg := fmt.Sprintf("📍 <b>Events near %s</b>\n\nFound %d event(s) in your subscribed states:", cityName, len(matchingEvents))
+	if err := client.SendMessage(headerMsg); err != nil {
+		fmt.Fprintf(os.Stderr, "Error sending header: %v\n", err)
+	}
+
+	// Send each event
+	for i, evt := range matchingEvents {
+		currentStatus := user.GetEventStatus(evt.ID)
+		note := user.GetEventNote(evt.ID)
+		msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, chatID, prefs)
+
+		if !dryRun {
+			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
+			}
+
+			// Rate limiting
+			if i < len(matchingEvents)-1 {
+				time.Sleep(1 * time.Second)
+			}
+		}
+	}
+
+	// Track stats: events viewed
+	if !dryRun {
+		user.IncrementEventsViewed(len(matchingEvents))
+		*modified = true
+	}
+
+	return "", nil // Already sent via messages
+}
+
+// handleListNotes lists all events with notes
+func handleListNotes(prefs preferences.Preferences, chatID, botToken string, dryRun bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return errUserNotFound, nil
+	}
+
+	if len(user.EventNotes) == 0 {
+		return "📝 You have no notes.\n\nUse /note &lt;event_id&gt; &lt;text&gt; to add a note to an event.", nil
+	}
+
+	response := fmt.Sprintf("📝 <b>Your Event Notes</b> (%d)\n\n", len(user.EventNotes))
+
+	// List each event with note
+	for eventID, noteText := range user.EventNotes {
+		response += fmt.Sprintf("Event ID: <code>%s</code>\n", eventID)
+		response += fmt.Sprintf("📝 <i>%s</i>\n\n", noteText)
+	}
+
+	response += "Use /note &lt;event_id&gt; clear to remove a note.\n"
+	response += "Use /events or /my-events to see event details."
+
+	return response, nil
+}
+
 func handleList(prefs preferences.Preferences, chatID string) string {
 	states := prefs.GetStates(chatID)
 
@@ -1021,7 +1468,7 @@ If you're subscribed to any states, you'll receive notifications when new events
 Use /list to see your current subscriptions.`
 }
 
-func handleSearch(prefs preferences.Preferences, chatID, keyword string, botToken string, dryRun bool) (string, []*event.Event) {
+func handleSearch(prefs preferences.Preferences, chatID, keyword string, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
 	// Fetch all events
 	sc := scraper.New()
 	allEvents, err := sc.FetchEvents()
@@ -1092,7 +1539,8 @@ Showing first %d results:`, len(matchingEvents), keyword, len(eventsToSend))
 		for i, evt := range eventsToSend {
 			user := prefs.GetUser(chatID)
 			currentStatus := user.GetEventStatus(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatus(evt, currentStatus)
+			note := user.GetEventNote(evt.ID)
+			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, chatID, prefs)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}
@@ -1102,6 +1550,11 @@ Showing first %d results:`, len(matchingEvents), keyword, len(eventsToSend))
 				time.Sleep(1 * time.Second)
 			}
 		}
+
+		// Track stats: events viewed
+		user := prefs.GetUser(chatID)
+		user.IncrementEventsViewed(len(eventsToSend))
+		*modified = true
 
 		return "", nil // Already sent
 	}
@@ -1207,7 +1660,7 @@ Tap the file to import all events into your calendar app!`, len(filteredEvents),
 	return fmt.Sprintf("[DRY RUN] Would send bulk calendar file with %d events for %s", len(filteredEvents), strings.Join(filterStates, ", ")), nil
 }
 
-func handleMyEvents(prefs preferences.Preferences, chatID string, botToken string, dryRun bool) (string, []*event.Event) {
+func handleMyEvents(prefs preferences.Preferences, chatID string, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
 	user := prefs.GetUser(chatID)
 
 	if len(user.EventStatuses) == 0 {
@@ -1323,7 +1776,8 @@ You have %d tracked event(s):`, totalEvents)
 
 			// Send each event with status buttons
 			for i, evt := range group {
-				msg, keyboard := telegram.FormatEventWithStatus(evt, status)
+				note := user.GetEventNote(evt.ID)
+				msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, status, note, chatID, prefs)
 				if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 					fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 				}
@@ -1335,13 +1789,17 @@ You have %d tracked event(s):`, totalEvents)
 			}
 		}
 
+		// Track stats: events viewed
+		user.IncrementEventsViewed(totalEvents)
+		*modified = true
+
 		return "", nil // Already sent
 	}
 
 	return fmt.Sprintf("[DRY RUN] Would send %d tracked events", totalEvents), nil
 }
 
-func handleAllEvents(prefs preferences.Preferences, chatID string, botToken string, dryRun bool) (string, []*event.Event) {
+func handleAllEvents(prefs preferences.Preferences, chatID string, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
 	// Get user's subscribed states
 	states := prefs.GetStates(chatID)
 	if len(states) == 0 {
@@ -1422,7 +1880,8 @@ Showing %d event(s), sorted by date:`, len(filteredEvents), strings.Join(states,
 		user := prefs.GetUser(chatID)
 		for i, evt := range eventsToSend {
 			currentStatus := user.GetEventStatus(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatus(evt, currentStatus)
+			note := user.GetEventNote(evt.ID)
+			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, chatID, prefs)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}
@@ -1432,6 +1891,10 @@ Showing %d event(s), sorted by date:`, len(filteredEvents), strings.Join(states,
 				time.Sleep(1 * time.Second)
 			}
 		}
+
+		// Track stats: events viewed
+		user.IncrementEventsViewed(len(eventsToSend))
+		*modified = true
 
 		return "", nil // Already sent
 	}
@@ -1599,6 +2062,36 @@ func handleManageWithKeyboard(prefs preferences.Preferences, chatID, botToken st
 // handleSettingsWithKeyboard shows the settings keyboard
 func handleSettingsWithKeyboard(prefs preferences.Preferences, chatID, botToken string, dryRun bool) (string, []*event.Event) {
 	text, keyboard := showSettingsKeyboard(prefs, chatID)
+
+	if !dryRun {
+		client, err := telegram.NewClient(botToken, chatID)
+		if err == nil {
+			if err := client.SendMessageWithKeyboard(text, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending keyboard: %v\n", err)
+			}
+			return "", nil // Already sent via keyboard
+		}
+	}
+
+	return text, nil
+}
+
+// handleUnsubscribeAllWithKeyboard shows the unsubscribe all confirmation keyboard
+func handleUnsubscribeAllWithKeyboard(prefs preferences.Preferences, chatID, botToken string, dryRun bool) (string, []*event.Event) {
+	states := prefs.GetStates(chatID)
+	if len(states) == 0 {
+		return "ℹ️ You have no active subscriptions.", nil
+	}
+
+	text := fmt.Sprintf("⚠️ Are you sure you want to unsubscribe from <b>all %d state(s)</b>?\n\nThis will remove: %s", len(states), strings.Join(states, ", "))
+	keyboard := &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
+			{
+				{Text: "✅ Yes, unsubscribe all", CallbackData: "unsubscribe-all:confirm"},
+				{Text: "❌ Cancel", CallbackData: "menu:main"},
+			},
+		},
+	}
 
 	if !dryRun {
 		client, err := telegram.NewClient(botToken, chatID)
@@ -1985,4 +2478,37 @@ func handleBulkCallback(prefs preferences.Preferences, chatID, action string, mo
 	default:
 		return "❌ Unknown bulk action", nil
 	}
+}
+
+// archiveWeeklyStatsForAllUsers archives the current week's stats to history for all users
+func archiveWeeklyStatsForAllUsers(prefs preferences.Preferences, storage *preferences.GistStorage) {
+	fmt.Println("📊 Archiving weekly stats for all users...")
+
+	chatIDs := prefs.GetAllUsers()
+	if len(chatIDs) == 0 {
+		fmt.Println("ℹ️ No users found")
+		return
+	}
+
+	archivedCount := 0
+	for _, chatID := range chatIDs {
+		user := prefs.GetUser(chatID)
+		if !user.EnableStats {
+			continue
+		}
+
+		// Archive current week to history
+		user.ArchiveCurrentWeek()
+		archivedCount++
+
+		fmt.Printf("✅ Archived stats for user %s\n", chatID)
+	}
+
+	// Save updated preferences
+	if err := storage.Save(prefs); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving preferences: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ Successfully archived stats for %d user(s)\n", archivedCount)
 }

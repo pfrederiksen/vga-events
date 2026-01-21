@@ -744,3 +744,351 @@ func TestUserPreferences_EventNotes_Migration(t *testing.T) {
 		t.Errorf("GetEventNote = %q, want %q", got, "Test note")
 	}
 }
+func TestWeeklyStats(t *testing.T) {
+	prefs := NewPreferences()
+	chatID := "12345"
+
+	user := prefs.GetUser(chatID)
+	if user.WeeklyStats == nil {
+		t.Fatal("WeeklyStats should be initialized")
+	}
+
+	// Test IncrementEventsViewed
+	user.IncrementEventsViewed(1)
+	if user.WeeklyStats.EventsViewed != 1 {
+		t.Errorf("EventsViewed = %d, want 1", user.WeeklyStats.EventsViewed)
+	}
+
+	// Test IncrementEventStatus
+	user.IncrementEventStatus("interested")
+	user.IncrementEventStatus("interested")
+	user.IncrementEventStatus("registered")
+
+	if user.WeeklyStats.EventsMarked["interested"] != 2 {
+		t.Errorf("EventsMarked[interested] = %d, want 2", user.WeeklyStats.EventsMarked["interested"])
+	}
+	if user.WeeklyStats.EventsMarked["registered"] != 1 {
+		t.Errorf("EventsMarked[registered] = %d, want 1", user.WeeklyStats.EventsMarked["registered"])
+	}
+}
+
+func TestArchiveCurrentWeek(t *testing.T) {
+	prefs := NewPreferences()
+	chatID := "12345"
+
+	user := prefs.GetUser(chatID)
+
+	// Add some stats
+	user.IncrementEventsViewed(1)
+	user.IncrementEventsViewed(1)
+	user.IncrementEventStatus("interested")
+
+	// Get current week key
+	weekKey := GetWeekKey(time.Now())
+
+	// Archive current week
+	user.ArchiveCurrentWeek()
+
+	// Check that stats were archived
+	if user.StatsHistory == nil {
+		t.Fatal("StatsHistory should be initialized")
+	}
+
+	archived, exists := user.StatsHistory[weekKey]
+	if !exists {
+		t.Fatalf("Stats for week %s not archived", weekKey)
+	}
+
+	if archived.EventsViewed != 2 {
+		t.Errorf("Archived EventsViewed = %d, want 2", archived.EventsViewed)
+	}
+
+	// Check that current stats were reset
+	if user.WeeklyStats.EventsViewed != 0 {
+		t.Errorf("Current EventsViewed = %d, want 0", user.WeeklyStats.EventsViewed)
+	}
+}
+
+func TestGetAllTimeStats(t *testing.T) {
+	prefs := NewPreferences()
+	chatID := "12345"
+
+	user := prefs.GetUser(chatID)
+
+	// Add current week stats
+	user.IncrementEventsViewed(1)
+	user.IncrementEventsViewed(1)
+	user.IncrementEventStatus("interested")
+
+	// Archive a week
+	user.ArchiveCurrentWeek()
+
+	// Add more stats
+	user.IncrementEventsViewed(1)
+	user.IncrementEventStatus("registered")
+
+	// Get all-time stats
+	allTime := user.GetAllTimeStats()
+
+	if allTime.EventsViewed != 3 {
+		t.Errorf("AllTime EventsViewed = %d, want 3", allTime.EventsViewed)
+	}
+
+	if allTime.EventsMarked["interested"] != 1 {
+		t.Errorf("AllTime EventsMarked[interested] = %d, want 1", allTime.EventsMarked["interested"])
+	}
+
+	if allTime.EventsMarked["registered"] != 1 {
+		t.Errorf("AllTime EventsMarked[registered] = %d, want 1", allTime.EventsMarked["registered"])
+	}
+}
+
+func TestGetWeekKey(t *testing.T) {
+	// Test a known date
+	testDate := time.Date(2026, 1, 21, 0, 0, 0, 0, time.UTC)
+	weekKey := GetWeekKey(testDate)
+
+	// Week key should be in format YYYY-WXX
+	if len(weekKey) != 8 {
+		t.Errorf("Week key length = %d, want 8", len(weekKey))
+	}
+
+	// Should start with year
+	if weekKey[:4] != "2026" {
+		t.Errorf("Week key year = %s, want 2026", weekKey[:4])
+	}
+
+	// Test different weeks give different keys
+	week1 := GetWeekKey(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	week2 := GetWeekKey(time.Date(2026, 1, 8, 0, 0, 0, 0, time.UTC))
+
+	if week1 == week2 {
+		t.Errorf("Different weeks produced same key: %s", week1)
+	}
+}
+
+func TestFriendManagement(t *testing.T) {
+	prefs := NewPreferences()
+	user1ID := "12345"
+	user2ID := "67890"
+
+	user1 := prefs.GetUser(user1ID)
+
+	// Initially no friends
+	if user1.GetFriendCount() != 0 {
+		t.Errorf("Initial friend count = %d, want 0", user1.GetFriendCount())
+	}
+
+	// Add friend
+	added := user1.AddFriend(user2ID)
+	if !added {
+		t.Error("AddFriend returned false, expected true")
+	}
+
+	// Check friend count
+	if user1.GetFriendCount() != 1 {
+		t.Errorf("Friend count after add = %d, want 1", user1.GetFriendCount())
+	}
+
+	// Check IsFriend
+	if !user1.IsFriend(user2ID) {
+		t.Error("IsFriend returned false, expected true")
+	}
+
+	// Add same friend again should return false
+	added = user1.AddFriend(user2ID)
+	if added {
+		t.Error("AddFriend duplicate returned true, expected false")
+	}
+
+	// Check friend count didn't increase
+	if user1.GetFriendCount() != 1 {
+		t.Errorf("Friend count after duplicate = %d, want 1", user1.GetFriendCount())
+	}
+
+	// Remove friend
+	removed := user1.RemoveFriend(user2ID)
+	if !removed {
+		t.Error("RemoveFriend returned false, expected true")
+	}
+
+	// Check friend count
+	if user1.GetFriendCount() != 0 {
+		t.Errorf("Friend count after remove = %d, want 0", user1.GetFriendCount())
+	}
+
+	// Check IsFriend
+	if user1.IsFriend(user2ID) {
+		t.Error("IsFriend returned true, expected false")
+	}
+
+	// Remove non-existent friend should return false
+	removed = user1.RemoveFriend(user2ID)
+	if removed {
+		t.Error("RemoveFriend non-existent returned true, expected false")
+	}
+}
+
+func TestGetInviteCode(t *testing.T) {
+	prefs := NewPreferences()
+	chatID := "123456789"
+
+	user := prefs.GetUser(chatID)
+
+	inviteCode := user.GetInviteCode()
+
+	if inviteCode == "" {
+		t.Error("GetInviteCode returned empty string")
+	}
+
+	// Invite code should be consistent
+	inviteCode2 := user.GetInviteCode()
+	if inviteCode != inviteCode2 {
+		t.Errorf("GetInviteCode inconsistent: %s != %s", inviteCode, inviteCode2)
+	}
+
+	// CreatePendingInvite should return same code
+	pendingCode := user.CreatePendingInvite()
+	if pendingCode != inviteCode {
+		t.Errorf("CreatePendingInvite = %s, want %s", pendingCode, inviteCode)
+	}
+}
+
+func TestGenerateInviteCode(t *testing.T) {
+	// Test with various chat IDs
+	tests := []struct {
+		chatID string
+		want   string
+	}{
+		{"123456789", "456789"},
+		{"12345", "12345"},
+		{"123", "123"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.chatID, func(t *testing.T) {
+			got := generateInviteCode(tt.chatID)
+			if got != tt.want {
+				t.Errorf("generateInviteCode(%q) = %q, want %q", tt.chatID, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetFriendsForEvent(t *testing.T) {
+	prefs := NewPreferences()
+	user1ID := "12345"
+	user2ID := "67890"
+	user3ID := "11111"
+	eventID := "event123"
+
+	user1 := prefs.GetUser(user1ID)
+	user2 := prefs.GetUser(user2ID)
+	user3 := prefs.GetUser(user3ID)
+
+	// Setup: user1 has user2 and user3 as friends
+	user1.AddFriend(user2ID)
+	user1.AddFriend(user3ID)
+
+	// Enable sharing for all users
+	user1.ShareEvents = true
+	user2.ShareEvents = true
+	user3.ShareEvents = true
+
+	// user2 registers for event
+	user2.SetEventStatus(eventID, "registered")
+
+	// user3 marks as interested
+	user3.SetEventStatus(eventID, "interested")
+
+	// Get friends for event
+	friends := prefs.GetFriendsForEvent(user1ID, eventID)
+
+	if len(friends) != 2 {
+		t.Errorf("GetFriendsForEvent returned %d friends, want 2", len(friends))
+	}
+
+	// Check that both user2 and user3 are in the list
+	foundUser2 := false
+	foundUser3 := false
+	for _, friendID := range friends {
+		if friendID == user2ID {
+			foundUser2 = true
+		}
+		if friendID == user3ID {
+			foundUser3 = true
+		}
+	}
+
+	if !foundUser2 {
+		t.Error("user2 not in friends list")
+	}
+	if !foundUser3 {
+		t.Error("user3 not in friends list")
+	}
+}
+
+func TestGetFriendsForEvent_PrivacyControls(t *testing.T) {
+	prefs := NewPreferences()
+	user1ID := "12345"
+	user2ID := "67890"
+	eventID := "event123"
+
+	user1 := prefs.GetUser(user1ID)
+	user2 := prefs.GetUser(user2ID)
+
+	// Setup friendship
+	user1.AddFriend(user2ID)
+
+	// user2 registers for event
+	user2.SetEventStatus(eventID, "registered")
+
+	// Test: user1 has sharing disabled
+	user1.ShareEvents = false
+	user2.ShareEvents = true
+
+	friends := prefs.GetFriendsForEvent(user1ID, eventID)
+	if len(friends) != 0 {
+		t.Errorf("With user1 sharing disabled, got %d friends, want 0", len(friends))
+	}
+
+	// Test: user2 has sharing disabled
+	user1.ShareEvents = true
+	user2.ShareEvents = false
+
+	friends = prefs.GetFriendsForEvent(user1ID, eventID)
+	if len(friends) != 0 {
+		t.Errorf("With user2 sharing disabled, got %d friends, want 0", len(friends))
+	}
+
+	// Test: both have sharing enabled
+	user1.ShareEvents = true
+	user2.ShareEvents = true
+
+	friends = prefs.GetFriendsForEvent(user1ID, eventID)
+	if len(friends) != 1 {
+		t.Errorf("With both sharing enabled, got %d friends, want 1", len(friends))
+	}
+}
+
+func TestFriendMigration(t *testing.T) {
+	prefs := NewPreferences()
+	chatID := "12345"
+
+	user := prefs.GetUser(chatID)
+
+	// Check that friend fields are initialized
+	if user.FriendChatIDs == nil {
+		t.Error("FriendChatIDs not initialized")
+	}
+
+	if user.InviteCode == "" {
+		t.Error("InviteCode not initialized")
+	}
+
+	// ShareEvents should default to false
+	if user.ShareEvents {
+		t.Error("ShareEvents should default to false")
+	}
+}

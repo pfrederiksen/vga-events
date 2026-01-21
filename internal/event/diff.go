@@ -3,18 +3,27 @@ package event
 import (
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/pfrederiksen/vga-events/internal/course"
 )
 
 // Snapshot represents a collection of events at a point in time
 type Snapshot struct {
-	Events    map[string]*Event `json:"events"`     // keyed by Event.ID
-	UpdatedAt string            `json:"updated_at"` // RFC3339 timestamp
+	Events      map[string]*Event   `json:"events"`       // keyed by Event.ID
+	StableIndex map[string]string   `json:"stable_index"` // StableKey → ID mapping
+	ChangeLog   []*EventChange      `json:"change_log"`   // Recent changes
+	CourseCache *course.CourseCache `json:"course_cache"` // Cached course information
+	UpdatedAt   string              `json:"updated_at"`   // RFC3339 timestamp
 }
 
 // NewSnapshot creates an empty snapshot
 func NewSnapshot() *Snapshot {
 	return &Snapshot{
-		Events: make(map[string]*Event),
+		Events:      make(map[string]*Event),
+		StableIndex: make(map[string]string),
+		ChangeLog:   make([]*EventChange, 0),
+		CourseCache: course.NewCourseCache(),
 	}
 }
 
@@ -80,7 +89,101 @@ func CreateSnapshot(events []*Event, updatedAt string) *Snapshot {
 
 	for _, evt := range events {
 		snap.Events[evt.ID] = evt
+		// Build stable index
+		if evt.StableKey != "" {
+			snap.StableIndex[evt.StableKey] = evt.ID
+		}
 	}
 
 	return snap
+}
+
+// EventChange represents a change detected in an event
+type EventChange struct {
+	EventID    string    `json:"event_id"`
+	StableKey  string    `json:"stable_key"`
+	ChangeType string    `json:"change_type"` // "date", "title", "city", "new"
+	OldValue   string    `json:"old_value"`
+	NewValue   string    `json:"new_value"`
+	DetectedAt time.Time `json:"detected_at"`
+}
+
+// DetectChanges compares two events and returns detected changes
+func DetectChanges(previous, current *Event) []*EventChange {
+	var changes []*EventChange
+
+	// If no previous event, this is a new event
+	if previous == nil {
+		return []*EventChange{
+			{
+				EventID:    current.ID,
+				StableKey:  current.StableKey,
+				ChangeType: "new",
+				OldValue:   "",
+				NewValue:   current.Title,
+				DetectedAt: time.Now().UTC(),
+			},
+		}
+	}
+
+	// Detect date change
+	if previous.DateText != current.DateText {
+		changes = append(changes, &EventChange{
+			EventID:    current.ID,
+			StableKey:  current.StableKey,
+			ChangeType: "date",
+			OldValue:   previous.DateText,
+			NewValue:   current.DateText,
+			DetectedAt: time.Now().UTC(),
+		})
+	}
+
+	// Detect title change
+	if previous.Title != current.Title {
+		changes = append(changes, &EventChange{
+			EventID:    current.ID,
+			StableKey:  current.StableKey,
+			ChangeType: "title",
+			OldValue:   previous.Title,
+			NewValue:   current.Title,
+			DetectedAt: time.Now().UTC(),
+		})
+	}
+
+	// Detect city change
+	if previous.City != current.City {
+		changes = append(changes, &EventChange{
+			EventID:    current.ID,
+			StableKey:  current.StableKey,
+			ChangeType: "city",
+			OldValue:   previous.City,
+			NewValue:   current.City,
+			DetectedAt: time.Now().UTC(),
+		})
+	}
+
+	return changes
+}
+
+// CompareSnapshots compares two sets of events and returns all detected changes
+func CompareSnapshots(previousEvents, currentEvents map[string]*Event, previousIndex, currentIndex map[string]string) []*EventChange {
+	var allChanges []*EventChange
+
+	// Check each stable key in current snapshot
+	for stableKey, currentID := range currentIndex {
+		currentEvent := currentEvents[currentID]
+
+		// Look for previous event with same stable key
+		if previousID, exists := previousIndex[stableKey]; exists {
+			previousEvent := previousEvents[previousID]
+			changes := DetectChanges(previousEvent, currentEvent)
+			allChanges = append(allChanges, changes...)
+		} else {
+			// New event (stable key doesn't exist in previous)
+			changes := DetectChanges(nil, currentEvent)
+			allChanges = append(allChanges, changes...)
+		}
+	}
+
+	return allChanges
 }

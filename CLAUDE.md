@@ -71,12 +71,13 @@ The project includes an interactive Telegram bot with personalized notifications
 - **vga-events-telegram** - Sends notifications to Telegram
 - **vga-events-bot** - Processes user commands (/subscribe, /unsubscribe, etc.)
 
-**Six workflows:**
+**Seven workflows:**
 - **telegram-bot-commands.yml** - Processes commands every 15 minutes
 - **telegram-bot.yml** - Checks for events hourly, sends personalized notifications
 - **telegram-daily-digest.yml** - Sends daily digest at 9 AM UTC for digest mode users
 - **telegram-weekly-digest.yml** - Sends weekly digest on Mondays at 9 AM UTC
 - **telegram-reminders.yml** - Sends event reminders daily at 9 AM UTC
+- **telegram-weekly-stats.yml** - Archives weekly stats every Sunday at 11:59 PM UTC
 - **ci.yml** - Runs tests and builds on PRs
 
 **Storage:**
@@ -95,6 +96,27 @@ The project includes an interactive Telegram bot with personalized notifications
 7. **.github/workflows/telegram-daily-digest.yml** - Daily digest delivery
 8. **.github/workflows/telegram-weekly-digest.yml** - Weekly digest delivery
 9. **.github/workflows/telegram-reminders.yml** - Event reminder delivery
+
+### v0.5.0 Features (Current)
+
+**New Commands:**
+- `/note <event_id> <text>` - Add personal notes to events
+- `/note <event_id> clear` - Remove notes
+- `/notes` - List all events with notes
+- `/near <city>` - Find events near a specific city (e.g., `/near Las Vegas`)
+- `/unsubscribe all` - Unsubscribe from all states with confirmation
+
+**New Infrastructure:**
+- **Event Change Detection** - Events tracked with StableKey (SHA1 of state + normalized title)
+- **Change Notifications** - Detects when event dates/titles/cities change (infrastructure complete)
+- **Event Notes** - Personal notes stored in EventNotes map in UserPreferences
+
+**Data Model Changes:**
+- `Event.StableKey` - New field for tracking events across detail changes
+- `UserPreferences.EventNotes` - Map of event ID → note text
+- `UserPreferences.NotifyOnChanges` - Flag for change notifications (default: true)
+- `Snapshot.StableIndex` - Map of StableKey → Event ID
+- `Snapshot.ChangeLog` - Array of recent EventChange objects
 
 ### Local Development
 
