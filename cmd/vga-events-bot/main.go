@@ -368,7 +368,8 @@ func handlePreviewCallback(prefs preferences.Preferences, callback *telegram.Cal
 		for i, evt := range eventsToSend {
 			user := prefs.GetUser(callbackChatID)
 			currentStatus := user.GetEventStatus(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatus(evt, currentStatus)
+			note := user.GetEventNote(evt.ID)
+			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}
@@ -456,7 +457,8 @@ Sorted by soonest first:`, len(eventsToSend), len(filteredEvents), strings.Join(
 		for i, evt := range eventsToSend {
 			user := prefs.GetUser(chatID)
 			currentStatus := user.GetEventStatus(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatus(evt, currentStatus)
+			note := user.GetEventNote(evt.ID)
+			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}
@@ -842,6 +844,29 @@ Please provide a search keyword.
 	case "/events":
 		return handleAllEvents(prefs, chatID, botToken, dryRun)
 
+	case "/note":
+		if len(parts) < 2 {
+			return "❌ Please specify an event ID.\n\nUsage: /note &lt;event_id&gt; &lt;note_text&gt;\nUsage: /note &lt;event_id&gt; clear", nil
+		}
+		eventID := parts[1]
+
+		// Check if second param is "clear"
+		if len(parts) >= 3 && strings.ToLower(parts[2]) == "clear" {
+			return handleRemoveNote(prefs, chatID, eventID, modified)
+		}
+
+		// Need note text
+		if len(parts) < 3 {
+			return "❌ Please provide note text.\n\nUsage: /note &lt;event_id&gt; &lt;note_text&gt;", nil
+		}
+
+		// Join remaining parts as note text
+		noteText := strings.Join(parts[2:], " ")
+		return handleAddNote(prefs, chatID, eventID, noteText, modified)
+
+	case "/notes":
+		return handleListNotes(prefs, chatID, botToken, dryRun)
+
 	case "/reminders":
 		return handleRemindersWithKeyboard(prefs, chatID, botToken, dryRun)
 
@@ -867,6 +892,8 @@ I help you track VGA Golf events in your favorite states!
 /search - Search for events by keyword 🔍
 /events - View all events for your subscribed states 📅
 /my-events - View your tracked events ⭐
+/note - Add a note to an event 📝
+/notes - List all events with notes 📋
 /reminders - Configure event reminders 🔔
 /bulk - Bulk actions for multiple events 🔧
 /export-calendar - Download all events as .ics file 📅
@@ -1008,6 +1035,62 @@ func handleUnsubscribe(prefs preferences.Preferences, chatID, state string, modi
 	return response
 }
 
+// handleAddNote adds or updates a note for an event
+func handleAddNote(prefs preferences.Preferences, chatID, eventID, noteText string, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return "❌ Error: User not found", nil
+	}
+
+	user.SetEventNote(eventID, noteText)
+	*modified = true
+
+	return fmt.Sprintf("📝 Note added for event <code>%s</code>:\n\n<i>%s</i>", eventID, noteText), nil
+}
+
+// handleRemoveNote removes a note from an event
+func handleRemoveNote(prefs preferences.Preferences, chatID, eventID string, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return "❌ Error: User not found", nil
+	}
+
+	// Check if note exists
+	if user.GetEventNote(eventID) == "" {
+		return fmt.Sprintf("ℹ️ No note found for event <code>%s</code>", eventID), nil
+	}
+
+	user.RemoveEventNote(eventID)
+	*modified = true
+
+	return fmt.Sprintf("✅ Note removed for event <code>%s</code>", eventID), nil
+}
+
+// handleListNotes lists all events with notes
+func handleListNotes(prefs preferences.Preferences, chatID, botToken string, dryRun bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+	if user == nil {
+		return "❌ Error: User not found", nil
+	}
+
+	if len(user.EventNotes) == 0 {
+		return "📝 You have no notes.\n\nUse /note &lt;event_id&gt; &lt;text&gt; to add a note to an event.", nil
+	}
+
+	response := fmt.Sprintf("📝 <b>Your Event Notes</b> (%d)\n\n", len(user.EventNotes))
+
+	// List each event with note
+	for eventID, noteText := range user.EventNotes {
+		response += fmt.Sprintf("Event ID: <code>%s</code>\n", eventID)
+		response += fmt.Sprintf("📝 <i>%s</i>\n\n", noteText)
+	}
+
+	response += "Use /note &lt;event_id&gt; clear to remove a note.\n"
+	response += "Use /events or /my-events to see event details."
+
+	return response, nil
+}
+
 func handleList(prefs preferences.Preferences, chatID string) string {
 	states := prefs.GetStates(chatID)
 
@@ -1113,7 +1196,8 @@ Showing first %d results:`, len(matchingEvents), keyword, len(eventsToSend))
 		for i, evt := range eventsToSend {
 			user := prefs.GetUser(chatID)
 			currentStatus := user.GetEventStatus(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatus(evt, currentStatus)
+			note := user.GetEventNote(evt.ID)
+			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}
@@ -1344,7 +1428,8 @@ You have %d tracked event(s):`, totalEvents)
 
 			// Send each event with status buttons
 			for i, evt := range group {
-				msg, keyboard := telegram.FormatEventWithStatus(evt, status)
+				note := user.GetEventNote(evt.ID)
+				msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, status, note)
 				if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 					fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 				}
@@ -1443,7 +1528,8 @@ Showing %d event(s), sorted by date:`, len(filteredEvents), strings.Join(states,
 		user := prefs.GetUser(chatID)
 		for i, evt := range eventsToSend {
 			currentStatus := user.GetEventStatus(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatus(evt, currentStatus)
+			note := user.GetEventNote(evt.ID)
+			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}

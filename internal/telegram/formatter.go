@@ -9,10 +9,19 @@ import (
 
 // FormatEvent formats a single event as a Telegram message
 func FormatEvent(evt *event.Event) string {
+	return FormatEventWithNote(evt, "")
+}
+
+// FormatEventWithNote formats an event with an optional note
+func FormatEventWithNote(evt *event.Event, note string) string {
 	var msg strings.Builder
 
-	// Header with emoji
-	msg.WriteString("🏌️ <b>New VGA Golf Event!</b>\n\n")
+	// Header with emoji (include 📝 if note exists)
+	if note != "" {
+		msg.WriteString("🏌️ 📝 <b>New VGA Golf Event!</b>\n\n")
+	} else {
+		msg.WriteString("🏌️ <b>New VGA Golf Event!</b>\n\n")
+	}
 
 	// State and course
 	msg.WriteString(fmt.Sprintf("📍 <b>%s</b> - %s\n", evt.State, evt.Title))
@@ -26,6 +35,11 @@ func FormatEvent(evt *event.Event) string {
 	// City (if available)
 	if evt.City != "" {
 		msg.WriteString(fmt.Sprintf("🏢 %s\n", evt.City))
+	}
+
+	// Note (if available)
+	if note != "" {
+		msg.WriteString(fmt.Sprintf("\n📝 <i>%s</i>\n", note))
 	}
 
 	// Registration link
@@ -56,7 +70,12 @@ func FormatEventWithCalendar(evt *event.Event) (string, *InlineKeyboardMarkup) {
 
 // FormatEventWithStatus formats an event message with status and calendar buttons
 func FormatEventWithStatus(evt *event.Event, currentStatus string) (string, *InlineKeyboardMarkup) {
-	text := FormatEvent(evt)
+	return FormatEventWithStatusAndNote(evt, currentStatus, "")
+}
+
+// FormatEventWithStatusAndNote formats an event message with status, note, and calendar buttons
+func FormatEventWithStatusAndNote(evt *event.Event, currentStatus, note string) (string, *InlineKeyboardMarkup) {
+	text := FormatEventWithNote(evt, note)
 
 	// Add current status indicator to text if status is set
 	if currentStatus != "" {
