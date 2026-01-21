@@ -348,7 +348,9 @@ func handlePreviewCallback(prefs preferences.Preferences, callback *telegram.Cal
 		}
 
 		for i, evt := range eventsToSend {
-			msg, keyboard := telegram.FormatEventWithCalendar(evt)
+			user := prefs.GetUser(callbackChatID)
+			currentStatus := user.GetEventStatus(evt.ID)
+			msg, keyboard := telegram.FormatEventWithStatus(evt, currentStatus)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}
@@ -434,7 +436,9 @@ Sorted by soonest first:`, len(eventsToSend), len(filteredEvents), strings.Join(
 
 		// Send each event with calendar button
 		for i, evt := range eventsToSend {
-			msg, keyboard := telegram.FormatEventWithCalendar(evt)
+			user := prefs.GetUser(chatID)
+			currentStatus := user.GetEventStatus(evt.ID)
+			msg, keyboard := telegram.FormatEventWithStatus(evt, currentStatus)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}
@@ -770,7 +774,7 @@ Please provide a search keyword.
 		}
 		keyword := strings.Join(parts[1:], " ")
 		keyword = strings.Trim(keyword, `"'`) // Remove quotes if present
-		return handleSearch(chatID, keyword, botToken, dryRun)
+		return handleSearch(prefs, chatID, keyword, botToken, dryRun)
 
 	case "/export-calendar":
 		// Optional parameter: state code
@@ -966,7 +970,7 @@ If you're subscribed to any states, you'll receive notifications when new events
 Use /list to see your current subscriptions.`
 }
 
-func handleSearch(chatID, keyword string, botToken string, dryRun bool) (string, []*event.Event) {
+func handleSearch(prefs preferences.Preferences, chatID, keyword string, botToken string, dryRun bool) (string, []*event.Event) {
 	// Fetch all events
 	sc := scraper.New()
 	allEvents, err := sc.FetchEvents()
@@ -1023,7 +1027,9 @@ Showing first %d results:`, len(matchingEvents), keyword, len(eventsToSend))
 
 		// Send each event with calendar button and subscribe option
 		for i, evt := range eventsToSend {
-			msg, keyboard := telegram.FormatEventWithCalendar(evt)
+			user := prefs.GetUser(chatID)
+			currentStatus := user.GetEventStatus(evt.ID)
+			msg, keyboard := telegram.FormatEventWithStatus(evt, currentStatus)
 			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 			}
