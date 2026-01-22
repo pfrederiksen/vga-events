@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pfrederiksen/vga-events/internal/course"
 	"github.com/pfrederiksen/vga-events/internal/event"
 	"github.com/pfrederiksen/vga-events/internal/preferences"
 )
@@ -37,22 +36,6 @@ func FormatEventWithNote(evt *event.Event, note string) string {
 	// City (if available)
 	if evt.City != "" {
 		msg.WriteString(fmt.Sprintf("🏢 %s\n", evt.City))
-	}
-
-	// Course info (if available)
-	if courseInfo := course.LookupCourse(evt.Title, evt.State); courseInfo != nil {
-		msg.WriteString("\n")
-		msg.WriteString(fmt.Sprintf("🏌️ Par %d | %s yards", courseInfo.Par, formatYardage(courseInfo.Yardage)))
-		if courseInfo.Slope > 0 {
-			msg.WriteString(fmt.Sprintf(" | Slope %d", courseInfo.Slope))
-		}
-		msg.WriteString("\n")
-		if courseInfo.Rating > 0 {
-			msg.WriteString(fmt.Sprintf("⭐ Rating: %.1f\n", courseInfo.Rating))
-		}
-		if courseInfo.Website != "" {
-			msg.WriteString(fmt.Sprintf("🌐 %s\n", courseInfo.Website))
-		}
 	}
 
 	// Note (if available)
@@ -319,12 +302,3 @@ func FormatEventChangeWithKeyboard(evt *event.Event, changeType, oldValue, newVa
 	return text, keyboard
 }
 
-// formatYardage formats yardage with comma separators for readability
-func formatYardage(yardage int) string {
-	if yardage < 1000 {
-		return fmt.Sprintf("%d", yardage)
-	}
-	thousands := yardage / 1000
-	remainder := yardage % 1000
-	return fmt.Sprintf("%d,%03d", thousands, remainder)
-}

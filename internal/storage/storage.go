@@ -68,11 +68,6 @@ func (s *Storage) LoadSnapshot(state string) (*event.Snapshot, error) {
 		snapshot.Events = make(map[string]*event.Event)
 	}
 
-	// Restore CourseCache TTL (excluded from JSON with json:"-")
-	if snapshot.CourseCache != nil {
-		snapshot.CourseCache.TTL = 7 * 24 * time.Hour
-	}
-
 	return &snapshot, nil
 }
 
