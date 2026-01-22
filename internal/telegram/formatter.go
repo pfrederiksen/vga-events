@@ -301,4 +301,3 @@ func FormatEventChangeWithKeyboard(evt *event.Event, changeType, oldValue, newVa
 
 	return text, keyboard
 }
-
