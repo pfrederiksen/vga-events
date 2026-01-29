@@ -131,16 +131,21 @@ func getCourseDetailsForEvent(client *course.Client, evt *event.Event) *telegram
 	}
 
 	// Collect all tees (combined, no distinction between gender)
+	// Deduplicate by tee name - keep first occurrence (male tees come first)
+	seenTees := make(map[string]bool)
 	var tees []telegram.TeeDetails
 	for _, tee := range append(courseInfo.Tees.Male, courseInfo.Tees.Female...) {
-		tees = append(tees, telegram.TeeDetails{
-			Name:    tee.TeeName,
-			Par:     tee.ParTotal,
-			Yardage: tee.TotalYards,
-			Slope:   tee.SlopeRating,
-			Rating:  tee.CourseRating,
-			Holes:   tee.NumberOfHoles,
-		})
+		if !seenTees[tee.TeeName] {
+			seenTees[tee.TeeName] = true
+			tees = append(tees, telegram.TeeDetails{
+				Name:    tee.TeeName,
+				Par:     tee.ParTotal,
+				Yardage: tee.TotalYards,
+				Slope:   tee.SlopeRating,
+				Rating:  tee.CourseRating,
+				Holes:   tee.NumberOfHoles,
+			})
+		}
 	}
 
 	if len(tees) == 0 {
