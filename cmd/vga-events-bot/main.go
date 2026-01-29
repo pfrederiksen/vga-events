@@ -100,7 +100,9 @@ func main() {
 	// Initialize Golf Course API client if key is provided
 	if *golfCourseAPIKey != "" {
 		courseClient = course.NewClient(*golfCourseAPIKey)
-		fmt.Println("Golf Course API enabled")
+		fmt.Printf("Golf Course API enabled (key length: %d)\n", len(*golfCourseAPIKey))
+	} else {
+		fmt.Println("Golf Course API disabled (no API key provided)")
 	}
 
 	// Digest mode: send digest and exit
@@ -1674,18 +1676,25 @@ Tap the file to import all events into your calendar app!`, len(filteredEvents),
 // getCourseDetails fetches course information for an event
 func getCourseDetails(evt *event.Event) *telegram.CourseDetails {
 	if courseClient == nil {
+		fmt.Printf("[DEBUG] courseClient is nil for event: %s\n", evt.Title)
 		return nil
 	}
 
+	fmt.Printf("[DEBUG] Looking up course info for: %s, %s, %s\n", evt.Title, evt.City, evt.State)
 	courseInfo, err := courseClient.FindBestMatch(evt.Title, evt.City, evt.State)
 	if err != nil {
+		fmt.Printf("[DEBUG] Error fetching course info: %v\n", err)
 		// Silently ignore API errors
 		return nil
 	}
 
 	if courseInfo == nil {
+		fmt.Printf("[DEBUG] No course info found for: %s\n", evt.Title)
 		return nil
 	}
+
+	fmt.Printf("[DEBUG] Found course: %s with %d male + %d female tees\n",
+		courseInfo.GetDisplayName(), len(courseInfo.Tees.Male), len(courseInfo.Tees.Female))
 
 	// Collect all tees (combined, no distinction between gender)
 	var tees []telegram.TeeDetails
