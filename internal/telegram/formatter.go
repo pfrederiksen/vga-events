@@ -130,6 +130,14 @@ func FormatEventWithCourse(evt *event.Event, course *CourseDetails, note string)
 		if course.Phone != "" {
 			msg.WriteString(fmt.Sprintf("📞 %s\n", course.Phone))
 		}
+	} else {
+		// DEBUG: Show why course info is missing
+		msg.WriteString("\n")
+		if course == nil {
+			msg.WriteString("🔍 <i>Debug: course=nil</i>\n")
+		} else if len(course.Tees) == 0 {
+			msg.WriteString(fmt.Sprintf("🔍 <i>Debug: course=%s, tees=0</i>\n", course.Name))
+		}
 	}
 
 	// Note (if available)
