@@ -134,17 +134,8 @@ func (c *Client) FindBestMatch(courseName, city, state string) (*CourseInfo, err
 		}
 	}
 
-	// Build search query with course name and location
-	searchQuery := cleanName
-	if city != "" {
-		searchQuery = fmt.Sprintf("%s %s", cleanName, city)
-	}
-	if state != "" {
-		searchQuery = fmt.Sprintf("%s %s", searchQuery, state)
-	}
-
-	// Search via API
-	courses, err := c.Search(searchQuery)
+	// Try searching with course name only (city/state in query often returns 0 results)
+	courses, err := c.Search(cleanName)
 	if err != nil {
 		return nil, fmt.Errorf("searching courses: %w", err)
 	}
