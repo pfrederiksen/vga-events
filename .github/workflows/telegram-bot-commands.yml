@@ -9,9 +9,15 @@ on:
 permissions:
   contents: read
 
+# Prevent overlapping runs
+concurrency:
+  group: telegram-bot-commands
+  cancel-in-progress: false
+
 jobs:
   process-commands:
     runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours max
 
     steps:
       - name: Checkout code
@@ -34,8 +40,8 @@ jobs:
           TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
           TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
         run: |
-          echo "Starting long polling loop (will run for ~5h50m)..."
-          ./vga-events-bot --loop
+          echo "Starting long polling loop (will run for ~5h30m)..."
+          ./vga-events-bot --loop --loop-duration 5h30m
 
       - name: Summary
         if: always()

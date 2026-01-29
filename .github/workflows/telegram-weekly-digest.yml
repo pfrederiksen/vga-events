@@ -9,9 +9,15 @@ on:
 permissions:
   contents: read
 
+# Prevent overlapping runs
+concurrency:
+  group: telegram-weekly-digest
+  cancel-in-progress: false
+
 jobs:
   send-weekly-digests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code

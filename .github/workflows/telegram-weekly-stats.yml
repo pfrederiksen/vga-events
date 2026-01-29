@@ -9,9 +9,15 @@ on:
 permissions:
   contents: read
 
+# Prevent overlapping runs
+concurrency:
+  group: telegram-weekly-stats
+  cancel-in-progress: false
+
 jobs:
   rollover-stats:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code

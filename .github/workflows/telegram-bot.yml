@@ -9,9 +9,15 @@ on:
 permissions:
   contents: read
 
+# Prevent overlapping runs
+concurrency:
+  group: telegram-event-notifications
+  cancel-in-progress: false
+
 jobs:
   check-and-notify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # Should complete quickly
 
     steps:
       - name: Checkout code
