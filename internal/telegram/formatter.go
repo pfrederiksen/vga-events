@@ -8,14 +8,20 @@ import (
 	"github.com/pfrederiksen/vga-events/internal/preferences"
 )
 
-// CourseDetails represents golf course information for formatting
-type CourseDetails struct {
+// TeeDetails represents a single tee's information
+type TeeDetails struct {
 	Name    string
-	Holes   int
 	Par     int
 	Yardage int
 	Slope   int
 	Rating  float64
+	Holes   int
+}
+
+// CourseDetails represents golf course information for formatting
+type CourseDetails struct {
+	Name    string
+	Tees    []TeeDetails
 	Website string
 	Phone   string
 }
@@ -92,27 +98,25 @@ func FormatEventWithCourse(evt *event.Event, course *CourseDetails, note string)
 	}
 
 	// Course details (if available)
-	if course != nil {
+	if course != nil && len(course.Tees) > 0 {
 		msg.WriteString("\n")
+		msg.WriteString(fmt.Sprintf("⛳ <b>%s</b>\n", course.Name))
 
-		// Par and yardage on one line
-		if course.Par > 0 && course.Yardage > 0 {
-			msg.WriteString(fmt.Sprintf("⛳ Par %d | %s yards", course.Par, formatYardage(course.Yardage)))
+		// Show all tees
+		for _, tee := range course.Tees {
+			msg.WriteString(fmt.Sprintf("  <i>%s:</i> ", tee.Name))
 
-			// Add slope if available
-			if course.Slope > 0 {
-				msg.WriteString(fmt.Sprintf(" | Slope %d", course.Slope))
+			// Par and yardage
+			if tee.Par > 0 && tee.Yardage > 0 {
+				msg.WriteString(fmt.Sprintf("Par %d, %s yds", tee.Par, formatYardage(tee.Yardage)))
 			}
-			msg.WriteString("\n")
-		}
 
-		// Rating if available
-		if course.Rating > 0 {
-			msg.WriteString(fmt.Sprintf("⭐ Rating: %.1f", course.Rating))
-
-			// Add holes if not 18
-			if course.Holes > 0 && course.Holes != 18 {
-				msg.WriteString(fmt.Sprintf(" (%d holes)", course.Holes))
+			// Slope and rating
+			if tee.Slope > 0 {
+				msg.WriteString(fmt.Sprintf(", Slope %d", tee.Slope))
+			}
+			if tee.Rating > 0 {
+				msg.WriteString(fmt.Sprintf(", %.1f", tee.Rating))
 			}
 			msg.WriteString("\n")
 		}

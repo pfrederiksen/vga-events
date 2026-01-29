@@ -39,6 +39,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
           TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
+          GOLF_COURSE_API_KEY: ${{ secrets.GOLF_COURSE_API_KEY }}
         run: |
           echo "Starting long polling loop (will run for ~5h30m)..."
           ./vga-events-bot --loop --loop-duration 5h30m

@@ -14,6 +14,7 @@ type Client struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
+	cache      *Cache
 }
 
 // NewClient creates a new Golf Course API client
@@ -24,7 +25,20 @@ func NewClient(apiKey string) *Client {
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		cache: NewCache(),
 	}
+}
+
+// NewClientWithCache creates a client with an existing cache
+func NewClientWithCache(apiKey string, cache *Cache) *Client {
+	client := NewClient(apiKey)
+	client.cache = cache
+	return client
+}
+
+// GetCache returns the client's cache
+func (c *Client) GetCache() *Cache {
+	return c.cache
 }
 
 // Location represents course location information
@@ -113,6 +127,13 @@ func (c *Client) FindBestMatch(courseName, city, state string) (*CourseInfo, err
 	// Clean up course name (remove dates, special chars)
 	cleanName := CleanCourseName(courseName)
 
+	// Check cache first
+	if c.cache != nil {
+		if cached := c.cache.Get(cleanName, city, state); cached != nil {
+			return cached, nil
+		}
+	}
+
 	// Build search query with course name and location
 	searchQuery := cleanName
 	if city != "" {
@@ -122,36 +143,54 @@ func (c *Client) FindBestMatch(courseName, city, state string) (*CourseInfo, err
 		searchQuery = fmt.Sprintf("%s %s", searchQuery, state)
 	}
 
-	// Search
+	// Search via API
 	courses, err := c.Search(searchQuery)
 	if err != nil {
 		return nil, fmt.Errorf("searching courses: %w", err)
 	}
 
 	if len(courses) == 0 {
-		return nil, nil // No match found
+		// Cache negative result (store nil) to avoid repeated failed lookups
+		if c.cache != nil {
+			c.cache.Set(cleanName, city, state, nil)
+		}
+		return nil, nil
 	}
+
+	// Find best match
+	var bestMatch *CourseInfo
 
 	// If we have a city, try to match by city as well
 	if city != "" {
 		for i := range courses {
 			if strings.EqualFold(courses[i].Location.City, city) {
-				return &courses[i], nil
+				bestMatch = &courses[i]
+				break
 			}
 		}
 	}
 
 	// If we have a state, try to match by state
-	if state != "" {
+	if bestMatch == nil && state != "" {
 		for i := range courses {
 			if strings.EqualFold(courses[i].Location.State, state) {
-				return &courses[i], nil
+				bestMatch = &courses[i]
+				break
 			}
 		}
 	}
 
 	// Return first match if no location match
-	return &courses[0], nil
+	if bestMatch == nil {
+		bestMatch = &courses[0]
+	}
+
+	// Cache the result
+	if c.cache != nil {
+		c.cache.Set(cleanName, city, state, bestMatch)
+	}
+
+	return bestMatch, nil
 }
 
 // GetBestTee returns the best tee information (prefers men's championship tees)

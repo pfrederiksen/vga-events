@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pfrederiksen/vga-events/internal/calendar"
+	"github.com/pfrederiksen/vga-events/internal/course"
 	"github.com/pfrederiksen/vga-events/internal/event"
 	"github.com/pfrederiksen/vga-events/internal/preferences"
 	"github.com/pfrederiksen/vga-events/internal/scraper"
@@ -28,12 +29,13 @@ const (
 )
 
 var (
-	botToken     = flag.String("bot-token", os.Getenv("TELEGRAM_BOT_TOKEN"), "Telegram bot token (or env: TELEGRAM_BOT_TOKEN)")
-	gistID       = flag.String("gist-id", os.Getenv("TELEGRAM_GIST_ID"), "GitHub Gist ID (or env: TELEGRAM_GIST_ID)")
-	githubToken  = flag.String("github-token", os.Getenv("TELEGRAM_GITHUB_TOKEN"), "GitHub token (or env: TELEGRAM_GITHUB_TOKEN)")
-	dryRun       = flag.Bool("dry-run", false, "Show what would be done without making changes")
-	loop         = flag.Bool("loop", false, "Run continuously with long polling (for real-time responses)")
-	loopDuration = flag.Duration("loop-duration", 5*time.Hour+50*time.Minute, "Maximum duration for loop mode (default 5h50m)")
+	botToken         = flag.String("bot-token", os.Getenv("TELEGRAM_BOT_TOKEN"), "Telegram bot token (or env: TELEGRAM_BOT_TOKEN)")
+	gistID           = flag.String("gist-id", os.Getenv("TELEGRAM_GIST_ID"), "GitHub Gist ID (or env: TELEGRAM_GIST_ID)")
+	githubToken      = flag.String("github-token", os.Getenv("TELEGRAM_GITHUB_TOKEN"), "GitHub token (or env: TELEGRAM_GITHUB_TOKEN)")
+	golfCourseAPIKey = flag.String("golf-api-key", os.Getenv("GOLF_COURSE_API_KEY"), "Golf Course API key (or env: GOLF_COURSE_API_KEY)")
+	dryRun           = flag.Bool("dry-run", false, "Show what would be done without making changes")
+	loop             = flag.Bool("loop", false, "Run continuously with long polling (for real-time responses)")
+	loopDuration     = flag.Duration("loop-duration", 5*time.Hour+50*time.Minute, "Maximum duration for loop mode (default 5h50m)")
 	// Digest mode flags
 	digest     = flag.String("digest", "", "Send digest to specific chat ID (used by GitHub Actions)")
 	digestFile = flag.String("digest-file", "", "Path to digest events JSON file")
@@ -41,6 +43,9 @@ var (
 	// Stats rollover flag
 	archiveWeeklyStats = flag.Bool("archive-weekly-stats", false, "Archive current week's stats to history for all users")
 )
+
+// Global course API client (initialized if key provided)
+var courseClient *course.Client
 
 type Update struct {
 	UpdateID      int                     `json:"update_id"`
@@ -90,6 +95,12 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error initializing storage: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Initialize Golf Course API client if key is provided
+	if *golfCourseAPIKey != "" {
+		courseClient = course.NewClient(*golfCourseAPIKey)
+		fmt.Println("Golf Course API enabled")
 	}
 
 	// Digest mode: send digest and exit
@@ -1660,6 +1671,57 @@ Tap the file to import all events into your calendar app!`, len(filteredEvents),
 	return fmt.Sprintf("[DRY RUN] Would send bulk calendar file with %d events for %s", len(filteredEvents), strings.Join(filterStates, ", ")), nil
 }
 
+// getCourseDetails fetches course information for an event
+func getCourseDetails(evt *event.Event) *telegram.CourseDetails {
+	if courseClient == nil {
+		return nil
+	}
+
+	courseInfo, err := courseClient.FindBestMatch(evt.Title, evt.City, evt.State)
+	if err != nil {
+		// Silently ignore API errors
+		return nil
+	}
+
+	if courseInfo == nil {
+		return nil
+	}
+
+	// Collect all tees (prioritize men's, then women's)
+	var tees []telegram.TeeDetails
+	for _, maleTee := range courseInfo.Tees.Male {
+		tees = append(tees, telegram.TeeDetails{
+			Name:    maleTee.TeeName,
+			Par:     maleTee.ParTotal,
+			Yardage: maleTee.TotalYards,
+			Slope:   maleTee.SlopeRating,
+			Rating:  maleTee.CourseRating,
+			Holes:   maleTee.NumberOfHoles,
+		})
+	}
+	for _, femaleTee := range courseInfo.Tees.Female {
+		tees = append(tees, telegram.TeeDetails{
+			Name:    femaleTee.TeeName,
+			Par:     femaleTee.ParTotal,
+			Yardage: femaleTee.TotalYards,
+			Slope:   femaleTee.SlopeRating,
+			Rating:  femaleTee.CourseRating,
+			Holes:   femaleTee.NumberOfHoles,
+		})
+	}
+
+	if len(tees) == 0 {
+		return nil
+	}
+
+	return &telegram.CourseDetails{
+		Name:    courseInfo.GetDisplayName(),
+		Tees:    tees,
+		Website: "",
+		Phone:   "",
+	}
+}
+
 func handleMyEvents(prefs preferences.Preferences, chatID string, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
 	user := prefs.GetUser(chatID)
 
@@ -1777,14 +1839,19 @@ You have %d tracked event(s):`, totalEvents)
 			// Send each event with status buttons
 			for i, evt := range group {
 				note := user.GetEventNote(evt.ID)
-				msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, status, note, chatID, prefs)
+				courseDetails := getCourseDetails(evt)
+				msg, keyboard := telegram.FormatEventWithStatusAndCourse(evt, courseDetails, status, note, chatID, prefs)
 				if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
 					fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
 				}
 
-				// Rate limiting
+				// Rate limiting (longer if using course API)
 				if i < len(group)-1 {
-					time.Sleep(1 * time.Second)
+					if courseClient != nil {
+						time.Sleep(2 * time.Second)
+					} else {
+						time.Sleep(1 * time.Second)
+					}
 				}
 			}
 		}
