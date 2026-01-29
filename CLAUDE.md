@@ -107,6 +107,11 @@ The project includes an interactive Telegram bot with personalized notifications
 - `/unsubscribe all` - Unsubscribe from all states with confirmation
 
 **New Infrastructure:**
+- **Golf Course API Integration** - Enriches event notifications with detailed course information
+  - Shows ALL tee options with par, yardage, slope, and rating
+  - 30-day caching reduces API usage (300 requests/day limit)
+  - Appears in new event notifications AND `/my-events` command
+  - Uses golfcourseapi.com (~30,000 courses worldwide)
 - **Event Change Detection** - Events tracked with StableKey (SHA1 of state + normalized title)
 - **Change Notifications** - Detects when event dates/titles/cities change (infrastructure complete)
 - **Event Notes** - Personal notes stored in EventNotes map in UserPreferences
@@ -117,6 +122,7 @@ The project includes an interactive Telegram bot with personalized notifications
 - `UserPreferences.NotifyOnChanges` - Flag for change notifications (default: true)
 - `Snapshot.StableIndex` - Map of StableKey → Event ID
 - `Snapshot.ChangeLog` - Array of recent EventChange objects
+- `Snapshot.CourseCache` - 30-day cache for golf course information
 
 ### Local Development
 
@@ -135,6 +141,7 @@ echo '{}' | gh gist create --filename "vga-events-preferences.json" --desc "VGA 
 export TELEGRAM_BOT_TOKEN=your_bot_token
 export TELEGRAM_GIST_ID=your_gist_id
 export TELEGRAM_GITHUB_TOKEN=your_github_token
+export GOLF_COURSE_API_KEY=your_golf_api_key  # Optional: enables course info
 ```
 
 **Test command processing:**
@@ -201,6 +208,7 @@ As users subscribe, it will look like:
 - `TELEGRAM_BOT_TOKEN` - From @BotFather
 - `TELEGRAM_GIST_ID` - From create-gist.sh output
 - `TELEGRAM_GITHUB_TOKEN` - GitHub token with 'gist' scope
+- `GOLF_COURSE_API_KEY` - From golfcourseapi.com (optional, enables course info)
 
 ### Bot Commands
 
