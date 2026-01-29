@@ -15,14 +15,14 @@ type CachedCourse struct {
 // Cache stores course information with TTL
 type Cache struct {
 	mu      sync.RWMutex
-	courses map[string]*CachedCourse `json:"courses"` // Key: "courseName|city|state"
+	Courses map[string]*CachedCourse `json:"Courses"` // Key: "courseName|city|state"
 	TTL     time.Duration            `json:"ttl"`     // How long to cache
 }
 
 // NewCache creates a new course cache with 30-day TTL
 func NewCache() *Cache {
 	return &Cache{
-		courses: make(map[string]*CachedCourse),
+		Courses: make(map[string]*CachedCourse),
 		TTL:     30 * 24 * time.Hour, // 30 days
 	}
 }
@@ -38,7 +38,7 @@ func (c *Cache) Get(courseName, city, state string) *CourseInfo {
 	defer c.mu.RUnlock()
 
 	key := cacheKey(courseName, city, state)
-	cached, exists := c.courses[key]
+	cached, exists := c.Courses[key]
 	if !exists {
 		return nil
 	}
@@ -60,7 +60,7 @@ func (c *Cache) Set(courseName, city, state string, info *CourseInfo) {
 	now := time.Now().Unix()
 	key := cacheKey(courseName, city, state)
 
-	c.courses[key] = &CachedCourse{
+	c.Courses[key] = &CachedCourse{
 		Info:      info,
 		CachedAt:  now,
 		ExpiresAt: now + int64(c.TTL.Seconds()),
@@ -75,9 +75,9 @@ func (c *Cache) Cleanup() int {
 	now := time.Now().Unix()
 	removed := 0
 
-	for key, cached := range c.courses {
+	for key, cached := range c.Courses {
 		if cached.ExpiresAt < now {
-			delete(c.courses, key)
+			delete(c.Courses, key)
 			removed++
 		}
 	}
@@ -85,10 +85,10 @@ func (c *Cache) Cleanup() int {
 	return removed
 }
 
-// Size returns the number of cached courses
+// Size returns the number of cached Courses
 func (c *Cache) Size() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return len(c.courses)
+	return len(c.Courses)
 }

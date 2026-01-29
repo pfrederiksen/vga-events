@@ -1687,26 +1687,16 @@ func getCourseDetails(evt *event.Event) *telegram.CourseDetails {
 		return nil
 	}
 
-	// Collect all tees (prioritize men's, then women's)
+	// Collect all tees (combined, no distinction between gender)
 	var tees []telegram.TeeDetails
-	for _, maleTee := range courseInfo.Tees.Male {
+	for _, tee := range append(courseInfo.Tees.Male, courseInfo.Tees.Female...) {
 		tees = append(tees, telegram.TeeDetails{
-			Name:    maleTee.TeeName,
-			Par:     maleTee.ParTotal,
-			Yardage: maleTee.TotalYards,
-			Slope:   maleTee.SlopeRating,
-			Rating:  maleTee.CourseRating,
-			Holes:   maleTee.NumberOfHoles,
-		})
-	}
-	for _, femaleTee := range courseInfo.Tees.Female {
-		tees = append(tees, telegram.TeeDetails{
-			Name:    femaleTee.TeeName,
-			Par:     femaleTee.ParTotal,
-			Yardage: femaleTee.TotalYards,
-			Slope:   femaleTee.SlopeRating,
-			Rating:  femaleTee.CourseRating,
-			Holes:   femaleTee.NumberOfHoles,
+			Name:    tee.TeeName,
+			Par:     tee.ParTotal,
+			Yardage: tee.TotalYards,
+			Slope:   tee.SlopeRating,
+			Rating:  tee.CourseRating,
+			Holes:   tee.NumberOfHoles,
 		})
 	}
 

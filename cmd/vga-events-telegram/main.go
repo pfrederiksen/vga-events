@@ -114,6 +114,45 @@ func readEvents(filePath string) ([]*event.Event, error) {
 	return result.NewEvents, nil
 }
 
+// getCourseDetailsForEvent fetches course information for an event
+func getCourseDetailsForEvent(client *course.Client, evt *event.Event) *telegram.CourseDetails {
+	if client == nil {
+		return nil
+	}
+
+	courseInfo, err := client.FindBestMatch(evt.Title, evt.City, evt.State)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Error looking up course for %s: %v\n", evt.Title, err)
+		return nil
+	}
+
+	if courseInfo == nil {
+		return nil
+	}
+
+	// Collect all tees (combined, no distinction between gender)
+	var tees []telegram.TeeDetails
+	for _, tee := range append(courseInfo.Tees.Male, courseInfo.Tees.Female...) {
+		tees = append(tees, telegram.TeeDetails{
+			Name:    tee.TeeName,
+			Par:     tee.ParTotal,
+			Yardage: tee.TotalYards,
+			Slope:   tee.SlopeRating,
+			Rating:  tee.CourseRating,
+			Holes:   tee.NumberOfHoles,
+		})
+	}
+
+	if len(tees) == 0 {
+		return nil
+	}
+
+	return &telegram.CourseDetails{
+		Name: courseInfo.GetDisplayName(),
+		Tees: tees,
+	}
+}
+
 func main() {
 	flag.Parse()
 
@@ -169,46 +208,7 @@ func main() {
 
 		fmt.Printf("DRY RUN MODE - Would send %d messages:\n\n", len(events))
 		for i, evt := range events {
-			// Look up course information if Golf Course API is enabled
-			var courseDetails *telegram.CourseDetails
-			if courseClient != nil {
-				courseInfo, err := courseClient.FindBestMatch(evt.Title, evt.City, evt.State)
-				if err != nil {
-					fmt.Printf("Warning: Error looking up course for %s: %v\n", evt.Title, err)
-				} else if courseInfo != nil {
-					// Collect all tees
-					var tees []telegram.TeeDetails
-					for _, maleTee := range courseInfo.Tees.Male {
-						tees = append(tees, telegram.TeeDetails{
-							Name:    maleTee.TeeName,
-							Par:     maleTee.ParTotal,
-							Yardage: maleTee.TotalYards,
-							Slope:   maleTee.SlopeRating,
-							Rating:  maleTee.CourseRating,
-							Holes:   maleTee.NumberOfHoles,
-						})
-					}
-					for _, femaleTee := range courseInfo.Tees.Female {
-						tees = append(tees, telegram.TeeDetails{
-							Name:    femaleTee.TeeName,
-							Par:     femaleTee.ParTotal,
-							Yardage: femaleTee.TotalYards,
-							Slope:   femaleTee.SlopeRating,
-							Rating:  femaleTee.CourseRating,
-							Holes:   femaleTee.NumberOfHoles,
-						})
-					}
-
-					if len(tees) > 0 {
-						courseDetails = &telegram.CourseDetails{
-							Name:    courseInfo.GetDisplayName(),
-							Tees:    tees,
-							Website: "",
-							Phone:   "",
-						}
-					}
-				}
-			}
+			courseDetails := getCourseDetailsForEvent(courseClient, evt)
 
 			msg, keyboard := telegram.FormatEventWithStatusAndCourse(evt, courseDetails, "", "", "", nil)
 			fmt.Printf("--- Message %d/%d ---\n", i+1, len(events))
@@ -253,46 +253,10 @@ func main() {
 		var keyboard *telegram.InlineKeyboardMarkup
 
 		// Look up course information if Golf Course API is enabled
-		var courseDetails *telegram.CourseDetails
-		if courseClient != nil {
-			courseInfo, err := courseClient.FindBestMatch(evt.Title, evt.City, evt.State)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Error looking up course for %s: %v\n", evt.Title, err)
-			} else if courseInfo != nil {
-				// Collect all tees (prioritize men's, then women's)
-				var tees []telegram.TeeDetails
-				for _, maleTee := range courseInfo.Tees.Male {
-					tees = append(tees, telegram.TeeDetails{
-						Name:    maleTee.TeeName,
-						Par:     maleTee.ParTotal,
-						Yardage: maleTee.TotalYards,
-						Slope:   maleTee.SlopeRating,
-						Rating:  maleTee.CourseRating,
-						Holes:   maleTee.NumberOfHoles,
-					})
-				}
-				for _, femaleTee := range courseInfo.Tees.Female {
-					tees = append(tees, telegram.TeeDetails{
-						Name:    femaleTee.TeeName,
-						Par:     femaleTee.ParTotal,
-						Yardage: femaleTee.TotalYards,
-						Slope:   femaleTee.SlopeRating,
-						Rating:  femaleTee.CourseRating,
-						Holes:   femaleTee.NumberOfHoles,
-					})
-				}
-
-				if len(tees) > 0 {
-					courseDetails = &telegram.CourseDetails{
-						Name:    courseInfo.GetDisplayName(),
-						Tees:    tees,
-						Website: "",
-						Phone:   "",
-					}
-					fmt.Printf("Found course info for %s: %s (%d tee options)\n",
-						evt.Title, courseDetails.Name, len(tees))
-				}
-			}
+		courseDetails := getCourseDetailsForEvent(courseClient, evt)
+		if courseDetails != nil {
+			fmt.Printf("Found course info for %s: %s (%d tee options)\n",
+				evt.Title, courseDetails.Name, len(courseDetails.Tees))
 		}
 
 		// Use reminder format if in reminder mode
