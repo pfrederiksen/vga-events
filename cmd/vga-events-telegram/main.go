@@ -160,11 +160,12 @@ func main() {
 	if *dryRun {
 		fmt.Printf("DRY RUN MODE - Would send %d messages:\n\n", len(events))
 		for i, evt := range events {
-			msg, _ := telegram.FormatEventWithCalendar(evt)
+			msg, keyboard := telegram.FormatEventWithStatus(evt, "")
 			fmt.Printf("--- Message %d/%d ---\n", i+1, len(events))
 			fmt.Println(msg)
 			fmt.Printf("\n(Length: %d characters)\n", len(msg))
-			fmt.Printf("Calendar button: 📅 Add to Calendar (callback: calendar:%s)\n\n", evt.ID)
+			fmt.Printf("Buttons: 📅 Calendar, ⭐ Interested, ✅ Registered, 🤔 Maybe, ❌ Skip\n\n")
+			_ = keyboard // keyboard is used but we're showing simplified output
 		}
 		os.Exit(0)
 	}
@@ -186,7 +187,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Send messages with calendar buttons
+	// Send messages with interactive buttons
 	for i, evt := range events {
 		var msg string
 		var keyboard *telegram.InlineKeyboardMarkup
@@ -195,7 +196,8 @@ func main() {
 		if *checkReminders {
 			msg, keyboard = telegram.FormatReminder(evt, *reminderDays)
 		} else {
-			msg, keyboard = telegram.FormatEventWithCalendar(evt)
+			// Use status keyboard for new events (same as /my-events)
+			msg, keyboard = telegram.FormatEventWithStatus(evt, "")
 		}
 
 		if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
