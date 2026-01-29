@@ -160,7 +160,7 @@ jobs:
                 echo "  Sending $EVENT_COUNT new event(s) immediately to user $CHAT_ID..."
 
                 # Send events with time-based filtering
-                if ./vga-events-telegram --chat-id "$CHAT_ID" --events-file "user_events_${CHAT_ID}.json" --max-messages 10 --hide-past="$HIDE_PAST" --days-ahead="$DAYS_AHEAD"; then
+                if ./vga-events-telegram --chat-id "$CHAT_ID" --events-file "user_events_${CHAT_ID}.json" --max-messages 10 --hide-past="$HIDE_PAST" --days-ahead="$DAYS_AHEAD" --golf-api-key "$GOLF_COURSE_API_KEY"; then
                   echo "  ✅ Successfully sent events"
 
                   # Mark events as seen by adding their IDs with timestamps to preferences
