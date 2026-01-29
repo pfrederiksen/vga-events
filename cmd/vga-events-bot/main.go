@@ -920,7 +920,7 @@ Please provide a search keyword.
 		return handleStats(prefs, chatID, period), nil
 
 	case "/check":
-		return handleCheck(chatID), nil
+		return handleCheck(prefs, chatID, botToken, dryRun, modified)
 
 	case "/invite":
 		return handleInvite(prefs, chatID), nil
@@ -1469,14 +1469,107 @@ Example: /subscribe NV`
 	return response
 }
 
-func handleCheck(chatID string) string {
-	return `🔍 <b>Manual Check</b>
+func handleCheck(prefs preferences.Preferences, chatID, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
 
-The bot checks for new events every hour automatically.
+	// Check if user is subscribed to any states
+	if len(user.States) == 0 {
+		return `🔍 <b>Manual Check</b>
 
-If you're subscribed to any states, you'll receive notifications when new events are posted.
+You're not subscribed to any states yet!
 
-Use /list to see your current subscriptions.`
+Use /subscribe to choose states you want to follow.`, nil
+	}
+
+	// Fetch all events
+	sc := scraper.New()
+	allEvents, err := sc.FetchEvents()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
+		return errFetchingEvents, nil
+	}
+
+	// Filter by subscribed states and exclude already seen events
+	var unseenEvents []*event.Event
+	for _, evt := range allEvents {
+		// Check if event is in a subscribed state
+		isSubscribed := false
+		for _, state := range user.States {
+			if strings.EqualFold(evt.State, state) {
+				isSubscribed = true
+				break
+			}
+		}
+
+		if !isSubscribed {
+			continue
+		}
+
+		// Check if already seen
+		if !user.HasSeenEvent(evt.ID) {
+			unseenEvents = append(unseenEvents, evt)
+		}
+	}
+
+	if len(unseenEvents) == 0 {
+		statesText := strings.Join(user.States, ", ")
+		return fmt.Sprintf(`🔍 <b>Manual Check</b>
+
+No new events found!
+
+You're all caught up with events in: %s
+
+The bot will notify you when new events are posted.`, statesText), nil
+	}
+
+	// Sort by date
+	event.SortByDate(unseenEvents)
+
+	// Send events
+	if !dryRun {
+		client, err := telegram.NewClient(botToken, chatID)
+		if err != nil {
+			return "❌ Error sending events", nil
+		}
+
+		// Send header
+		statesText := strings.Join(user.States, ", ")
+		headerMsg := fmt.Sprintf(`🔍 <b>Manual Check</b>
+
+Found %d new event(s) in %s:`, len(unseenEvents), statesText)
+
+		if err := client.SendMessage(headerMsg); err != nil {
+			fmt.Fprintf(os.Stderr, "Error sending header: %v\n", err)
+		}
+
+		// Send each event with course info and note
+		for i, evt := range unseenEvents {
+			note := user.GetEventNote(evt.ID)
+			courseDetails := getCourseDetails(evt)
+			msg := telegram.FormatEventWithCourse(evt, courseDetails, note)
+			if err := client.SendMessage(msg); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
+			}
+
+			// Mark as seen
+			user.MarkEventSeen(evt.ID)
+
+			// Rate limiting
+			if i < len(unseenEvents)-1 {
+				if courseClient != nil {
+					time.Sleep(2 * time.Second)
+				} else {
+					time.Sleep(1 * time.Second)
+				}
+			}
+		}
+
+		*modified = true
+
+		return "", nil // Already sent
+	}
+
+	return fmt.Sprintf("[DRY RUN] Would send %d new events", len(unseenEvents)), nil
 }
 
 func handleSearch(prefs preferences.Preferences, chatID, keyword string, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
