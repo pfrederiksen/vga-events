@@ -8,6 +8,24 @@ import (
 	"github.com/pfrederiksen/vga-events/internal/preferences"
 )
 
+// TeeDetails represents a single tee's information
+type TeeDetails struct {
+	Name    string
+	Par     int
+	Yardage int
+	Slope   int
+	Rating  float64
+	Holes   int
+}
+
+// CourseDetails represents golf course information for formatting
+type CourseDetails struct {
+	Name    string
+	Tees    []TeeDetails
+	Website string
+	Phone   string
+}
+
 // FormatEvent formats a single event as a Telegram message
 func FormatEvent(evt *event.Event) string {
 	return FormatEventWithNote(evt, "")
@@ -54,6 +72,92 @@ func FormatEventWithNote(evt *event.Event, note string) string {
 	return msg.String()
 }
 
+// FormatEventWithCourse formats an event with optional course details
+func FormatEventWithCourse(evt *event.Event, course *CourseDetails, note string) string {
+	var msg strings.Builder
+
+	// Header with emoji (include 📝 if note exists)
+	if note != "" {
+		msg.WriteString("🏌️ 📝 <b>New VGA Golf Event!</b>\n\n")
+	} else {
+		msg.WriteString("🏌️ <b>New VGA Golf Event!</b>\n\n")
+	}
+
+	// State and course
+	msg.WriteString(fmt.Sprintf("📍 <b>%s</b> - %s\n", evt.State, evt.Title))
+
+	// Date (if available) - use enhanced formatting
+	if evt.DateText != "" {
+		niceDate := event.FormatDateNice(evt.DateText)
+		msg.WriteString(fmt.Sprintf("📅 %s\n", niceDate))
+	}
+
+	// City (if available)
+	if evt.City != "" {
+		msg.WriteString(fmt.Sprintf("🏢 %s\n", evt.City))
+	}
+
+	// Course details (if available)
+	if course != nil && len(course.Tees) > 0 {
+		msg.WriteString("\n")
+		msg.WriteString(fmt.Sprintf("⛳ <b>%s</b>\n", course.Name))
+
+		// Show all tees
+		for _, tee := range course.Tees {
+			msg.WriteString(fmt.Sprintf("  <i>%s:</i> ", tee.Name))
+
+			// Par and yardage
+			if tee.Par > 0 && tee.Yardage > 0 {
+				msg.WriteString(fmt.Sprintf("Par %d, %s yds", tee.Par, formatYardage(tee.Yardage)))
+			}
+
+			// Slope and rating
+			if tee.Slope > 0 {
+				msg.WriteString(fmt.Sprintf(", Slope %d", tee.Slope))
+			}
+			if tee.Rating > 0 {
+				msg.WriteString(fmt.Sprintf(", %.1f", tee.Rating))
+			}
+			msg.WriteString("\n")
+		}
+
+		// Website if available
+		if course.Website != "" {
+			msg.WriteString(fmt.Sprintf("🌐 %s\n", course.Website))
+		}
+
+		// Phone if available
+		if course.Phone != "" {
+			msg.WriteString(fmt.Sprintf("📞 %s\n", course.Phone))
+		}
+	}
+
+	// Note (if available)
+	if note != "" {
+		msg.WriteString(fmt.Sprintf("\n📝 <i>%s</i>\n", note))
+	}
+
+	// Registration link
+	msg.WriteString("\n🔗 <a href=\"https://vgagolf.org/state-events\">vgagolf.org/state-events</a>\n")
+	msg.WriteString("<i>(login required)</i>\n")
+
+	// Hashtags
+	stateHashtag := fmt.Sprintf("#%s", strings.ReplaceAll(evt.State, " ", ""))
+	msg.WriteString(fmt.Sprintf("\n#VGAGolf #Golf %s", stateHashtag))
+
+	return msg.String()
+}
+
+// formatYardage formats yardage with comma for thousands
+func formatYardage(yardage int) string {
+	if yardage >= 10000 {
+		return fmt.Sprintf("%d,%03d", yardage/1000, yardage%1000)
+	} else if yardage >= 1000 {
+		return fmt.Sprintf("%d,%03d", yardage/1000, yardage%1000)
+	}
+	return fmt.Sprintf("%d", yardage)
+}
+
 // FormatEventWithCalendar formats an event message with a calendar download button
 func FormatEventWithCalendar(evt *event.Event) (string, *InlineKeyboardMarkup) {
 	text := FormatEvent(evt)
@@ -77,6 +181,67 @@ func FormatEventWithStatus(evt *event.Event, currentStatus string) (string, *Inl
 // FormatEventWithStatusAndNote formats an event message with status, note, friend count, and calendar buttons
 func FormatEventWithStatusAndNote(evt *event.Event, currentStatus, note, chatID string, prefs preferences.Preferences) (string, *InlineKeyboardMarkup) {
 	text := FormatEventWithNote(evt, note)
+
+	// Add friend count if user has friends registered/interested in this event
+	if chatID != "" && prefs != nil {
+		friendIDs := prefs.GetFriendsForEvent(chatID, evt.ID)
+		if len(friendIDs) > 0 {
+			friendText := ""
+			if len(friendIDs) == 1 {
+				friendText = "\n👥 <b>1 friend</b> registered for this event\n"
+			} else {
+				friendText = fmt.Sprintf("\n👥 <b>%d friends</b> registered for this event\n", len(friendIDs))
+			}
+			// Insert friend info after the course info and before the registration link
+			text = strings.Replace(text, "\n🔗 <a href=", friendText+"\n🔗 <a href=", 1)
+		}
+	}
+
+	// Add current status indicator to text if status is set
+	if currentStatus != "" {
+		statusEmoji := ""
+		statusText := ""
+		switch currentStatus {
+		case "interested":
+			statusEmoji = "⭐"
+			statusText = "Interested"
+		case "registered":
+			statusEmoji = "✅"
+			statusText = "Registered"
+		case "maybe":
+			statusEmoji = "🤔"
+			statusText = "Maybe"
+		case "skip":
+			statusEmoji = "❌"
+			statusText = "Skipped"
+		}
+		if statusEmoji != "" {
+			text = fmt.Sprintf("%s %s <b>%s</b>\n\n%s", statusEmoji, statusEmoji, statusText, text)
+		}
+	}
+
+	keyboard := &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "📅 Calendar", CallbackData: fmt.Sprintf("calendar:%s", evt.ID)},
+			},
+			{
+				{Text: "⭐ Interested", CallbackData: fmt.Sprintf("status:%s:interested", evt.ID)},
+				{Text: "✅ Registered", CallbackData: fmt.Sprintf("status:%s:registered", evt.ID)},
+			},
+			{
+				{Text: "🤔 Maybe", CallbackData: fmt.Sprintf("status:%s:maybe", evt.ID)},
+				{Text: "❌ Skip", CallbackData: fmt.Sprintf("status:%s:skip", evt.ID)},
+			},
+		},
+	}
+
+	return text, keyboard
+}
+
+// FormatEventWithStatusAndCourse formats an event with course info, status, note, and interactive buttons
+func FormatEventWithStatusAndCourse(evt *event.Event, course *CourseDetails, currentStatus, note, chatID string, prefs preferences.Preferences) (string, *InlineKeyboardMarkup) {
+	text := FormatEventWithCourse(evt, course, note)
 
 	// Add friend count if user has friends registered/interested in this event
 	if chatID != "" && prefs != nil {

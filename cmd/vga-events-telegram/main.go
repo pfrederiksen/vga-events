@@ -8,21 +8,23 @@ import (
 	"os"
 	"time"
 
+	"github.com/pfrederiksen/vga-events/internal/course"
 	"github.com/pfrederiksen/vga-events/internal/event"
 	"github.com/pfrederiksen/vga-events/internal/telegram"
 )
 
 var (
-	botToken       = flag.String("bot-token", os.Getenv("TELEGRAM_BOT_TOKEN"), "Telegram bot token (or env: TELEGRAM_BOT_TOKEN)")
-	chatID         = flag.String("chat-id", os.Getenv("TELEGRAM_CHAT_ID"), "Telegram chat ID (or env: TELEGRAM_CHAT_ID)")
-	eventsFile     = flag.String("events-file", "", "Path to events JSON file (or read from stdin)")
-	dryRun         = flag.Bool("dry-run", false, "Print messages without sending")
-	maxMessages    = flag.Int("max-messages", 10, "Maximum number of messages to send")
-	stateFilter    = flag.String("state", "", "Only send messages for this state")
-	hidePast       = flag.Bool("hide-past", true, "Filter out past events (default: true)")
-	daysAhead      = flag.Int("days-ahead", 0, "Only show events within N days (0 = disabled)")
-	checkReminders = flag.Bool("check-reminders", false, "Check if event matches reminder days (exits 0 if match, 1 if no match)")
-	reminderDays   = flag.Int("reminder-days", 0, "Number of days before event to send reminder (used with --check-reminders)")
+	botToken         = flag.String("bot-token", os.Getenv("TELEGRAM_BOT_TOKEN"), "Telegram bot token (or env: TELEGRAM_BOT_TOKEN)")
+	chatID           = flag.String("chat-id", os.Getenv("TELEGRAM_CHAT_ID"), "Telegram chat ID (or env: TELEGRAM_CHAT_ID)")
+	golfCourseAPIKey = flag.String("golf-api-key", os.Getenv("GOLF_COURSE_API_KEY"), "Golf Course API key (or env: GOLF_COURSE_API_KEY)")
+	eventsFile       = flag.String("events-file", "", "Path to events JSON file (or read from stdin)")
+	dryRun           = flag.Bool("dry-run", false, "Print messages without sending")
+	maxMessages      = flag.Int("max-messages", 10, "Maximum number of messages to send")
+	stateFilter      = flag.String("state", "", "Only send messages for this state")
+	hidePast         = flag.Bool("hide-past", true, "Filter out past events (default: true)")
+	daysAhead        = flag.Int("days-ahead", 0, "Only show events within N days (0 = disabled)")
+	checkReminders   = flag.Bool("check-reminders", false, "Check if event matches reminder days (exits 0 if match, 1 if no match)")
+	reminderDays     = flag.Int("reminder-days", 0, "Number of days before event to send reminder (used with --check-reminders)")
 )
 
 // filterByState filters events by state code
@@ -112,6 +114,45 @@ func readEvents(filePath string) ([]*event.Event, error) {
 	return result.NewEvents, nil
 }
 
+// getCourseDetailsForEvent fetches course information for an event
+func getCourseDetailsForEvent(client *course.Client, evt *event.Event) *telegram.CourseDetails {
+	if client == nil {
+		return nil
+	}
+
+	courseInfo, err := client.FindBestMatch(evt.Title, evt.City, evt.State)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Error looking up course for %s: %v\n", evt.Title, err)
+		return nil
+	}
+
+	if courseInfo == nil {
+		return nil
+	}
+
+	// Collect all tees (combined, no distinction between gender)
+	var tees []telegram.TeeDetails
+	for _, tee := range append(courseInfo.Tees.Male, courseInfo.Tees.Female...) {
+		tees = append(tees, telegram.TeeDetails{
+			Name:    tee.TeeName,
+			Par:     tee.ParTotal,
+			Yardage: tee.TotalYards,
+			Slope:   tee.SlopeRating,
+			Rating:  tee.CourseRating,
+			Holes:   tee.NumberOfHoles,
+		})
+	}
+
+	if len(tees) == 0 {
+		return nil
+	}
+
+	return &telegram.CourseDetails{
+		Name: courseInfo.GetDisplayName(),
+		Tees: tees,
+	}
+}
+
 func main() {
 	flag.Parse()
 
@@ -158,12 +199,24 @@ func main() {
 
 	// Dry run mode
 	if *dryRun {
+		// Initialize Golf Course API client if key is provided
+		var courseClient *course.Client
+		if *golfCourseAPIKey != "" {
+			courseClient = course.NewClient(*golfCourseAPIKey)
+			fmt.Printf("Golf Course API enabled for dry run\n\n")
+		}
+
 		fmt.Printf("DRY RUN MODE - Would send %d messages:\n\n", len(events))
 		for i, evt := range events {
-			msg, keyboard := telegram.FormatEventWithStatus(evt, "")
+			courseDetails := getCourseDetailsForEvent(courseClient, evt)
+
+			msg, keyboard := telegram.FormatEventWithStatusAndCourse(evt, courseDetails, "", "", "", nil)
 			fmt.Printf("--- Message %d/%d ---\n", i+1, len(events))
 			fmt.Println(msg)
 			fmt.Printf("\n(Length: %d characters)\n", len(msg))
+			if courseDetails != nil {
+				fmt.Printf("Course info: %s (%d tee options)\n", courseDetails.Name, len(courseDetails.Tees))
+			}
 			fmt.Printf("Buttons: 📅 Calendar, ⭐ Interested, ✅ Registered, 🤔 Maybe, ❌ Skip\n\n")
 			_ = keyboard // keyboard is used but we're showing simplified output
 		}
@@ -187,17 +240,31 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize Golf Course API client if key is provided
+	var courseClient *course.Client
+	if *golfCourseAPIKey != "" {
+		courseClient = course.NewClient(*golfCourseAPIKey)
+		fmt.Printf("Golf Course API enabled\n")
+	}
+
 	// Send messages with interactive buttons
 	for i, evt := range events {
 		var msg string
 		var keyboard *telegram.InlineKeyboardMarkup
 
+		// Look up course information if Golf Course API is enabled
+		courseDetails := getCourseDetailsForEvent(courseClient, evt)
+		if courseDetails != nil {
+			fmt.Printf("Found course info for %s: %s (%d tee options)\n",
+				evt.Title, courseDetails.Name, len(courseDetails.Tees))
+		}
+
 		// Use reminder format if in reminder mode
 		if *checkReminders {
 			msg, keyboard = telegram.FormatReminder(evt, *reminderDays)
 		} else {
-			// Use status keyboard for new events (same as /my-events)
-			msg, keyboard = telegram.FormatEventWithStatus(evt, "")
+			// Use status keyboard with course info for new events
+			msg, keyboard = telegram.FormatEventWithStatusAndCourse(evt, courseDetails, "", "", "", nil)
 		}
 
 		if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
@@ -205,9 +272,13 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Rate limiting: wait between messages
+		// Rate limiting: wait between messages (extra delay if looking up course info)
 		if i < len(events)-1 {
-			time.Sleep(1 * time.Second)
+			if courseClient != nil {
+				time.Sleep(2 * time.Second) // Longer delay when using API
+			} else {
+				time.Sleep(1 * time.Second)
+			}
 		}
 	}
 
