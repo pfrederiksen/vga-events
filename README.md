@@ -14,16 +14,19 @@ A simple, reliable CLI tool to check for newly-added VGA Golf state events witho
 - JSON or text output formats
 - Exit codes for easy scripting
 
-### Telegram Bot (v0.5.0)
+### Telegram Bot (v0.5.2)
+- **Golf course information** - Detailed course data with all tee options, par, yardage, slope, and ratings (v0.5.0-v0.5.2)
 - **Personalized notifications** - Each user gets their own subscriptions
+- **Manual checks** - `/check` command to instantly check for new events (v0.5.2)
 - **Event tracking** - Mark events as interested/registered/maybe/skip
-- **Event notes** - Add personal notes to events (NEW in v0.5.0)
-- **Location search** - Find events near a specific city (NEW in v0.5.0)
+- **Event notes** - Add personal notes to events (v0.5.0)
+- **Location search** - Find events near a specific city (v0.5.0)
 - **Event reminders** - Get reminded 1 day, 3 days, 1 week, or 2 weeks before events
 - **Digest modes** - Choose immediate, daily, or weekly notifications
 - **Calendar export** - Download events as .ics files
 - **Bulk actions** - Manage multiple events at once
 - **Multi-user support** - Separate preferences for each user
+- **Social features** - Friend invitations and shared event tracking
 
 ## Installation
 
@@ -147,16 +150,25 @@ Send these commands to your bot in Telegram:
 - `/help` - Show help message with all commands
 - `/subscribe <STATE>` - Subscribe to a state's events (e.g., `/subscribe NV`)
 - `/unsubscribe <STATE>` - Unsubscribe from a state (e.g., `/unsubscribe CA`)
-- `/unsubscribe all` - Unsubscribe from all states with confirmation (NEW in v0.5.0)
+- `/unsubscribe all` - Unsubscribe from all states with confirmation
 - `/manage` - Manage your subscriptions with buttons
 - `/list` - Show your current subscriptions
+- `/check` - Manually check for new events right now (v0.5.2)
 
 **Event Discovery:**
 - `/search <keyword>` - Search for events (e.g., `/search "Pine Valley"`)
 - `/near <city>` - Find events near a city (e.g., `/near Las Vegas`)
 - `/events` - View all events for your subscribed states
 - `/my-events` - View events you've marked as interested/registered
+- `/check` - Check for new events right now (doesn't wait for hourly check)
 - `/export-calendar` - Download all events as .ics calendar file
+
+**Golf Course Information:**
+Events automatically include detailed course data when available:
+- All tee options (Black, Blue, White, Gold, etc.)
+- Par, yardage, slope rating, and course rating for each tee
+- Powered by golfcourseapi.com (~30,000 courses worldwide)
+- Cached for 30 days to minimize API usage
 
 **Event Notes:**
 - `/note <event_id> <text>` - Add a personal note to an event
@@ -210,6 +222,7 @@ The bot runs on GitHub Actions - no server needed! It:
    - `TELEGRAM_BOT_TOKEN` - Your bot token from @BotFather
    - `TELEGRAM_GIST_ID` - The Gist ID from step 1
    - `TELEGRAM_GITHUB_TOKEN` - GitHub token with 'gist' scope
+   - `GOLF_COURSE_API_KEY` - (Optional) API key from golfcourseapi.com for course info
 
 3. The workflows will start running automatically:
    - Commands processed every 15 minutes
@@ -224,6 +237,7 @@ For development or testing locally:
 export TELEGRAM_BOT_TOKEN=your_bot_token
 export TELEGRAM_GIST_ID=your_gist_id
 export TELEGRAM_GITHUB_TOKEN=your_github_token
+export GOLF_COURSE_API_KEY=your_golf_api_key  # Optional: enables course info
 
 # Process bot commands manually
 ./vga-events-bot

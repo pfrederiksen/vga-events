@@ -97,21 +97,27 @@ The project includes an interactive Telegram bot with personalized notifications
 8. **.github/workflows/telegram-weekly-digest.yml** - Weekly digest delivery
 9. **.github/workflows/telegram-reminders.yml** - Event reminder delivery
 
-### v0.5.0 Features (Current)
+### Current Version: v0.5.2
 
-**New Commands:**
-- `/note <event_id> <text>` - Add personal notes to events
-- `/note <event_id> clear` - Remove notes
-- `/notes` - List all events with notes
-- `/near <city>` - Find events near a specific city (e.g., `/near Las Vegas`)
-- `/unsubscribe all` - Unsubscribe from all states with confirmation
+**v0.5.2 (Latest):**
+- `/check` command for manual event checking - Instantly check for new events without waiting for hourly cycle
 
-**New Infrastructure:**
+**v0.5.1:**
+- Fixed Golf Course API integration - API key now correctly passed to workflows
+- Deduplicated tee listings - No more duplicate male/female tees with same names
+
+**v0.5.0:**
 - **Golf Course API Integration** - Enriches event notifications with detailed course information
-  - Shows ALL tee options with par, yardage, slope, and rating
+  - Shows ALL unique tee options with par, yardage, slope, and rating
   - 30-day caching reduces API usage (300 requests/day limit)
   - Appears in new event notifications AND `/my-events` command
   - Uses golfcourseapi.com (~30,000 courses worldwide)
+- **New Commands:**
+  - `/note <event_id> <text>` - Add personal notes to events
+  - `/note <event_id> clear` - Remove notes
+  - `/notes` - List all events with notes
+  - `/near <city>` - Find events near a specific city (e.g., `/near Las Vegas`)
+  - `/unsubscribe all` - Unsubscribe from all states with confirmation
 - **Event Change Detection** - Events tracked with StableKey (SHA1 of state + normalized title)
 - **Change Notifications** - Detects when event dates/titles/cities change (infrastructure complete)
 - **Event Notes** - Personal notes stored in EventNotes map in UserPreferences
