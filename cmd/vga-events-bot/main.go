@@ -100,9 +100,7 @@ func main() {
 	// Initialize Golf Course API client if key is provided
 	if *golfCourseAPIKey != "" {
 		courseClient = course.NewClient(*golfCourseAPIKey)
-		fmt.Printf("Golf Course API enabled (key length: %d)\n", len(*golfCourseAPIKey))
-	} else {
-		fmt.Println("Golf Course API disabled (no API key provided)")
+		fmt.Println("Golf Course API enabled")
 	}
 
 	// Digest mode: send digest and exit
@@ -1676,37 +1674,35 @@ Tap the file to import all events into your calendar app!`, len(filteredEvents),
 // getCourseDetails fetches course information for an event
 func getCourseDetails(evt *event.Event) *telegram.CourseDetails {
 	if courseClient == nil {
-		fmt.Printf("[DEBUG] courseClient is nil for event: %s\n", evt.Title)
 		return nil
 	}
 
-	fmt.Printf("[DEBUG] Looking up course info for: %s, %s, %s\n", evt.Title, evt.City, evt.State)
 	courseInfo, err := courseClient.FindBestMatch(evt.Title, evt.City, evt.State)
 	if err != nil {
-		fmt.Printf("[DEBUG] Error fetching course info: %v\n", err)
 		// Silently ignore API errors
 		return nil
 	}
 
 	if courseInfo == nil {
-		fmt.Printf("[DEBUG] No course info found for: %s\n", evt.Title)
 		return nil
 	}
 
-	fmt.Printf("[DEBUG] Found course: %s with %d male + %d female tees\n",
-		courseInfo.GetDisplayName(), len(courseInfo.Tees.Male), len(courseInfo.Tees.Female))
-
 	// Collect all tees (combined, no distinction between gender)
+	// Deduplicate by tee name - keep first occurrence (male tees come first)
+	seenTees := make(map[string]bool)
 	var tees []telegram.TeeDetails
 	for _, tee := range append(courseInfo.Tees.Male, courseInfo.Tees.Female...) {
-		tees = append(tees, telegram.TeeDetails{
-			Name:    tee.TeeName,
-			Par:     tee.ParTotal,
-			Yardage: tee.TotalYards,
-			Slope:   tee.SlopeRating,
-			Rating:  tee.CourseRating,
-			Holes:   tee.NumberOfHoles,
-		})
+		if !seenTees[tee.TeeName] {
+			seenTees[tee.TeeName] = true
+			tees = append(tees, telegram.TeeDetails{
+				Name:    tee.TeeName,
+				Par:     tee.ParTotal,
+				Yardage: tee.TotalYards,
+				Slope:   tee.SlopeRating,
+				Rating:  tee.CourseRating,
+				Holes:   tee.NumberOfHoles,
+			})
+		}
 	}
 
 	if len(tees) == 0 {
