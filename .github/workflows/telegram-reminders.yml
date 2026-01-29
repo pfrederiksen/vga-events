@@ -9,9 +9,15 @@ on:
 permissions:
   contents: read
 
+# Prevent overlapping runs
+concurrency:
+  group: telegram-reminders
+  cancel-in-progress: false
+
 jobs:
   send-reminders:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
