@@ -10,40 +10,51 @@ import (
 
 // Snapshot represents a collection of events at a point in time
 type Snapshot struct {
-	Events      map[string]*Event `json:"events"`       // keyed by Event.ID
-	StableIndex map[string]string `json:"stable_index"` // StableKey → ID mapping
-	ChangeLog   []*EventChange    `json:"change_log"`   // Recent changes
-	CourseCache *course.Cache     `json:"course_cache"` // Cached course information
-	UpdatedAt   string            `json:"updated_at"`   // RFC3339 timestamp
+	Events        map[string]*Event `json:"events"`         // keyed by Event.ID
+	RemovedEvents map[string]*Event `json:"removed_events"` // recently removed events (kept for 30 days)
+	StableIndex   map[string]string `json:"stable_index"`   // StableKey → ID mapping
+	ChangeLog     []*EventChange    `json:"change_log"`     // Recent changes
+	CourseCache   *course.Cache     `json:"course_cache"`   // Cached course information
+	UpdatedAt     string            `json:"updated_at"`     // RFC3339 timestamp
 }
 
 // NewSnapshot creates an empty snapshot
 func NewSnapshot() *Snapshot {
 	return &Snapshot{
-		Events:      make(map[string]*Event),
-		StableIndex: make(map[string]string),
-		ChangeLog:   make([]*EventChange, 0),
-		CourseCache: course.NewCache(),
+		Events:        make(map[string]*Event),
+		RemovedEvents: make(map[string]*Event),
+		StableIndex:   make(map[string]string),
+		ChangeLog:     make([]*EventChange, 0),
+		CourseCache:   course.NewCache(),
 	}
 }
 
 // DiffResult contains the results of comparing two snapshots
 type DiffResult struct {
-	NewEvents []*Event
-	States    map[string][]*Event // new events grouped by state
+	NewEvents     []*Event
+	RemovedEvents []*Event
+	States        map[string][]*Event // new events grouped by state
 }
 
-// Diff compares current events against a previous snapshot and returns new events
+// Diff compares current events against a previous snapshot and returns new and removed events
 func Diff(previous *Snapshot, current []*Event, stateFilter string) *DiffResult {
 	result := &DiffResult{
-		NewEvents: make([]*Event, 0),
-		States:    make(map[string][]*Event),
+		NewEvents:     make([]*Event, 0),
+		RemovedEvents: make([]*Event, 0),
+		States:        make(map[string][]*Event),
 	}
 
 	if previous == nil {
 		previous = NewSnapshot()
 	}
 
+	// Build current event ID map for removal detection
+	currentIDs := make(map[string]bool)
+	for _, evt := range current {
+		currentIDs[evt.ID] = true
+	}
+
+	// Check for new events
 	for _, evt := range current {
 		// Apply state filter
 		if stateFilter != "" && stateFilter != "ALL" {
@@ -64,12 +75,34 @@ func Diff(previous *Snapshot, current []*Event, stateFilter string) *DiffResult 
 		}
 	}
 
+	// Check for removed events (in previous but not in current)
+	for eventID, evt := range previous.Events {
+		if !currentIDs[eventID] {
+			// Apply state filter
+			if stateFilter != "" && stateFilter != "ALL" {
+				if !strings.EqualFold(evt.State, stateFilter) {
+					continue
+				}
+			}
+
+			result.RemovedEvents = append(result.RemovedEvents, evt)
+		}
+	}
+
 	// Sort new events for consistent output
 	sort.Slice(result.NewEvents, func(i, j int) bool {
 		if result.NewEvents[i].State != result.NewEvents[j].State {
 			return result.NewEvents[i].State < result.NewEvents[j].State
 		}
 		return result.NewEvents[i].Raw < result.NewEvents[j].Raw
+	})
+
+	// Sort removed events for consistent output
+	sort.Slice(result.RemovedEvents, func(i, j int) bool {
+		if result.RemovedEvents[i].State != result.RemovedEvents[j].State {
+			return result.RemovedEvents[i].State < result.RemovedEvents[j].State
+		}
+		return result.RemovedEvents[i].Raw < result.RemovedEvents[j].Raw
 	})
 
 	// Sort within each state group
@@ -98,11 +131,42 @@ func CreateSnapshot(events []*Event, updatedAt string) *Snapshot {
 	return snap
 }
 
+// StoreRemovedEvents adds removed events to the snapshot's removed events map
+func (s *Snapshot) StoreRemovedEvents(removed []*Event) {
+	if s.RemovedEvents == nil {
+		s.RemovedEvents = make(map[string]*Event)
+	}
+
+	for _, evt := range removed {
+		s.RemovedEvents[evt.ID] = evt
+	}
+}
+
+// CleanupRemovedEvents removes events that were removed more than 30 days ago
+func (s *Snapshot) CleanupRemovedEvents() int {
+	if s.RemovedEvents == nil {
+		return 0
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -30)
+	removed := 0
+
+	for id, evt := range s.RemovedEvents {
+		// If FirstSeen is older than 30 days ago, remove it
+		if evt.FirstSeen.Before(cutoff) {
+			delete(s.RemovedEvents, id)
+			removed++
+		}
+	}
+
+	return removed
+}
+
 // EventChange represents a change detected in an event
 type EventChange struct {
 	EventID    string    `json:"event_id"`
 	StableKey  string    `json:"stable_key"`
-	ChangeType string    `json:"change_type"` // "date", "title", "city", "new"
+	ChangeType string    `json:"change_type"` // "date", "title", "city", "new", "removed"
 	OldValue   string    `json:"old_value"`
 	NewValue   string    `json:"new_value"`
 	DetectedAt time.Time `json:"detected_at"`
@@ -182,6 +246,22 @@ func CompareSnapshots(previousEvents, currentEvents map[string]*Event, previousI
 			// New event (stable key doesn't exist in previous)
 			changes := DetectChanges(nil, currentEvent)
 			allChanges = append(allChanges, changes...)
+		}
+	}
+
+	// Check for removed events (in previous but not in current)
+	for stableKey, previousID := range previousIndex {
+		if _, exists := currentIndex[stableKey]; !exists {
+			// Event was removed
+			previousEvent := previousEvents[previousID]
+			allChanges = append(allChanges, &EventChange{
+				EventID:    previousID,
+				StableKey:  stableKey,
+				ChangeType: "removed",
+				OldValue:   previousEvent.Title,
+				NewValue:   "",
+				DetectedAt: time.Now().UTC(),
+			})
 		}
 	}
 

@@ -275,3 +275,179 @@ func TestCompareSnapshots(t *testing.T) {
 		}
 	})
 }
+
+func TestDiffWithRemovedEvents(t *testing.T) {
+	// Create some test events
+	evt1 := NewEvent("NV", "Event 1", "4.4.26", "Las Vegas", "NV - Event 1 4.4.26 - Las Vegas", "https://example.com")
+	evt2 := NewEvent("NV", "Event 2", "5.5.26", "Las Vegas", "NV - Event 2 5.5.26 - Las Vegas", "https://example.com")
+	evt3 := NewEvent("CA", "Event 3", "6.6.26", "Los Angeles", "CA - Event 3 6.6.26 - Los Angeles", "https://example.com")
+
+	t.Run("detects removed events", func(t *testing.T) {
+		// Previous snapshot had evt1, evt2, evt3
+		previous := NewSnapshot()
+		previous.Events[evt1.ID] = evt1
+		previous.Events[evt2.ID] = evt2
+		previous.Events[evt3.ID] = evt3
+
+		// Current events only have evt1 (evt2 and evt3 were removed)
+		current := []*Event{evt1}
+
+		result := Diff(previous, current, "")
+
+		if len(result.RemovedEvents) != 2 {
+			t.Errorf("expected 2 removed events, got %d", len(result.RemovedEvents))
+		}
+
+		// Check that evt2 and evt3 are in removed events
+		foundEvt2 := false
+		foundEvt3 := false
+		for _, evt := range result.RemovedEvents {
+			if evt.ID == evt2.ID {
+				foundEvt2 = true
+			}
+			if evt.ID == evt3.ID {
+				foundEvt3 = true
+			}
+		}
+
+		if !foundEvt2 {
+			t.Error("expected evt2 to be in removed events")
+		}
+		if !foundEvt3 {
+			t.Error("expected evt3 to be in removed events")
+		}
+	})
+
+	t.Run("filters removed events by state", func(t *testing.T) {
+		// Previous snapshot had all three events
+		previous := NewSnapshot()
+		previous.Events[evt1.ID] = evt1
+		previous.Events[evt2.ID] = evt2
+		previous.Events[evt3.ID] = evt3
+
+		// Current events are empty (all removed)
+		current := []*Event{}
+
+		// Filter by NV only
+		result := Diff(previous, current, "NV")
+
+		// Should only detect NV events as removed
+		if len(result.RemovedEvents) != 2 {
+			t.Errorf("expected 2 removed NV events, got %d", len(result.RemovedEvents))
+		}
+
+		for _, evt := range result.RemovedEvents {
+			if evt.State != "NV" {
+				t.Errorf("expected only NV events in removed, got %s", evt.State)
+			}
+		}
+	})
+
+	t.Run("handles no removed events", func(t *testing.T) {
+		// Previous snapshot had evt1
+		previous := NewSnapshot()
+		previous.Events[evt1.ID] = evt1
+
+		// Current still has evt1 (no removals)
+		current := []*Event{evt1}
+
+		result := Diff(previous, current, "")
+
+		if len(result.RemovedEvents) != 0 {
+			t.Errorf("expected 0 removed events, got %d", len(result.RemovedEvents))
+		}
+	})
+}
+
+func TestCompareSnapshotsWithRemovals(t *testing.T) {
+	// Create previous snapshot
+	evt1 := NewEvent("NV", "Event 1", "Apr 4 2026", "Las Vegas", "NV - Event 1 Apr 4 2026 - Las Vegas", "https://example.com")
+	evt2 := NewEvent("CA", "Event 2", "May 15 2026", "San Francisco", "CA - Event 2 May 15 2026 - San Francisco", "https://example.com")
+	previousEvents := map[string]*Event{evt1.ID: evt1, evt2.ID: evt2}
+	previousIndex := map[string]string{evt1.StableKey: evt1.ID, evt2.StableKey: evt2.ID}
+
+	t.Run("detects removed events", func(t *testing.T) {
+		// Current snapshot only has evt1 (evt2 was removed)
+		currentEvents := map[string]*Event{evt1.ID: evt1}
+		currentIndex := map[string]string{evt1.StableKey: evt1.ID}
+
+		changes := CompareSnapshots(previousEvents, currentEvents, previousIndex, currentIndex)
+
+		// Should have one removal change
+		foundRemoval := false
+		for _, change := range changes {
+			if change.ChangeType == "removed" {
+				foundRemoval = true
+				if change.StableKey != evt2.StableKey {
+					t.Errorf("expected removed event to be evt2, got StableKey %s", change.StableKey)
+				}
+				if change.OldValue != evt2.Title {
+					t.Errorf("expected OldValue to be %s, got %s", evt2.Title, change.OldValue)
+				}
+				if change.NewValue != "" {
+					t.Errorf("expected NewValue to be empty for removal, got %s", change.NewValue)
+				}
+			}
+		}
+
+		if !foundRemoval {
+			t.Error("expected to find removal change")
+		}
+	})
+}
+
+func TestSnapshotRemovedEventsStorage(t *testing.T) {
+	t.Run("stores removed events", func(t *testing.T) {
+		snapshot := NewSnapshot()
+		evt1 := NewEvent("NV", "Event 1", "Apr 4 2026", "Las Vegas", "NV - Event 1 - Las Vegas", "https://example.com")
+		evt2 := NewEvent("CA", "Event 2", "May 15 2026", "San Francisco", "CA - Event 2 - San Francisco", "https://example.com")
+
+		removedEvents := []*Event{evt1, evt2}
+		snapshot.StoreRemovedEvents(removedEvents)
+
+		if len(snapshot.RemovedEvents) != 2 {
+			t.Errorf("expected 2 removed events stored, got %d", len(snapshot.RemovedEvents))
+		}
+
+		if _, ok := snapshot.RemovedEvents[evt1.ID]; !ok {
+			t.Error("expected evt1 to be in removed events")
+		}
+		if _, ok := snapshot.RemovedEvents[evt2.ID]; !ok {
+			t.Error("expected evt2 to be in removed events")
+		}
+	})
+
+	t.Run("cleans up old removed events", func(t *testing.T) {
+		snapshot := NewSnapshot()
+
+		// Create an old event (40 days ago)
+		oldEvt := NewEvent("NV", "Old Event", "Apr 4 2026", "Las Vegas", "NV - Old Event - Las Vegas", "https://example.com")
+		oldEvt.FirstSeen = time.Now().AddDate(0, 0, -40)
+
+		// Create a recent event (10 days ago)
+		recentEvt := NewEvent("CA", "Recent Event", "May 15 2026", "San Francisco", "CA - Recent Event - San Francisco", "https://example.com")
+		recentEvt.FirstSeen = time.Now().AddDate(0, 0, -10)
+
+		snapshot.RemovedEvents[oldEvt.ID] = oldEvt
+		snapshot.RemovedEvents[recentEvt.ID] = recentEvt
+
+		// Cleanup should remove events older than 30 days
+		removed := snapshot.CleanupRemovedEvents()
+
+		if removed != 1 {
+			t.Errorf("expected to clean up 1 event, got %d", removed)
+		}
+
+		if len(snapshot.RemovedEvents) != 1 {
+			t.Errorf("expected 1 event remaining, got %d", len(snapshot.RemovedEvents))
+		}
+
+		if _, ok := snapshot.RemovedEvents[recentEvt.ID]; !ok {
+			t.Error("expected recent event to still be in removed events")
+		}
+
+		if _, ok := snapshot.RemovedEvents[oldEvt.ID]; ok {
+			t.Error("expected old event to be cleaned up")
+		}
+	})
+}

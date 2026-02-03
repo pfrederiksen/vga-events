@@ -466,3 +466,93 @@ func FormatEventChangeWithKeyboard(evt *event.Event, changeType, oldValue, newVa
 
 	return text, keyboard
 }
+
+// FormatRemovedEvent formats a high-urgency notification for tracked events that were removed
+// Used when user has the event marked as Registered/Interested/Maybe
+func FormatRemovedEvent(evt *event.Event, status string, note string) string {
+	var msg strings.Builder
+
+	// High urgency header
+	msg.WriteString("⚠️ <b>Event Removed/Cancelled</b>\n\n")
+
+	// Event details
+	msg.WriteString(fmt.Sprintf("📍 <b>%s</b> - %s\n", evt.State, evt.Title))
+
+	// Date (if available)
+	if evt.DateText != "" {
+		niceDate := event.FormatDateNice(evt.DateText)
+		msg.WriteString(fmt.Sprintf("📅 %s\n", niceDate))
+	}
+
+	// City (if available)
+	if evt.City != "" {
+		msg.WriteString(fmt.Sprintf("🏢 %s\n", evt.City))
+	}
+
+	// Show user's status
+	if status != "" {
+		statusEmoji := ""
+		statusText := ""
+		switch status {
+		case preferences.EventStatusRegistered:
+			statusEmoji = "✅"
+			statusText = "You were registered for this event"
+		case preferences.EventStatusInterested:
+			statusEmoji = "⭐"
+			statusText = "You marked this as interested"
+		case preferences.EventStatusMaybe:
+			statusEmoji = "🤔"
+			statusText = "You marked this as maybe"
+		}
+		if statusEmoji != "" {
+			msg.WriteString(fmt.Sprintf("\n%s <i>%s</i>\n", statusEmoji, statusText))
+		}
+	}
+
+	// Show user's note if they had one
+	if note != "" {
+		msg.WriteString(fmt.Sprintf("\n📝 <i>Your note: %s</i>\n", note))
+	}
+
+	// Explanation
+	msg.WriteString("\n❗ <b>This event is no longer listed on the VGA website.</b>\n")
+	msg.WriteString("Please check <a href=\"https://vgagolf.org/state-events\">vgagolf.org/state-events</a> for updates.\n")
+
+	// Hashtags
+	stateHashtag := fmt.Sprintf("#%s", strings.ReplaceAll(evt.State, " ", ""))
+	msg.WriteString(fmt.Sprintf("\n#VGAGolf #EventCancelled %s", stateHashtag))
+
+	return msg.String()
+}
+
+// FormatRemovedEventGeneral formats a low-urgency notification for removed events
+// Used when user is subscribed to the state but didn't have the event tracked
+func FormatRemovedEventGeneral(evt *event.Event) string {
+	var msg strings.Builder
+
+	// Low urgency header
+	msg.WriteString("ℹ️ <b>Event No Longer Available</b>\n\n")
+
+	// Event details
+	msg.WriteString(fmt.Sprintf("📍 <b>%s</b> - %s\n", evt.State, evt.Title))
+
+	// Date (if available)
+	if evt.DateText != "" {
+		niceDate := event.FormatDateNice(evt.DateText)
+		msg.WriteString(fmt.Sprintf("📅 %s\n", niceDate))
+	}
+
+	// City (if available)
+	if evt.City != "" {
+		msg.WriteString(fmt.Sprintf("🏢 %s\n", evt.City))
+	}
+
+	// Brief explanation
+	msg.WriteString("\nThis event has been removed from the VGA website.\n")
+
+	// Hashtags
+	stateHashtag := fmt.Sprintf("#%s", strings.ReplaceAll(evt.State, " ", ""))
+	msg.WriteString(fmt.Sprintf("\n#VGAGolf #EventCancelled %s", stateHashtag))
+
+	return msg.String()
+}

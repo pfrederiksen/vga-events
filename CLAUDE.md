@@ -97,9 +97,22 @@ The project includes an interactive Telegram bot with personalized notifications
 8. **.github/workflows/telegram-weekly-digest.yml** - Weekly digest delivery
 9. **.github/workflows/telegram-reminders.yml** - Event reminder delivery
 
-### Current Version: v0.5.2
+### Current Version: v0.6.0
 
-**v0.5.2 (Latest):**
+**v0.6.0 (Latest):**
+- **Event Removal Notifications** - Get notified when events are removed or cancelled from the VGA website
+  - High-priority notifications (⚠️) for events you're registered for or tracking
+  - Low-priority notifications (ℹ️) for events in your subscribed states
+  - Toggle with `/notify-removals on/off` command
+  - Includes your personal notes if you had any for the event
+  - Removed events stored for 30 days in snapshot
+- **Removal Detection Infrastructure:**
+  - Added `RemovedEvents` field to DiffResult
+  - CompareSnapshots now detects removed events via StableKey tracking
+  - Snapshot stores removed events separately with 30-day cleanup
+  - "removed" ChangeType added to EventChange
+
+**v0.5.2:**
 - `/check` command for manual event checking - Instantly check for new events without waiting for hourly cycle
 
 **v0.5.1:**
@@ -118,6 +131,7 @@ The project includes an interactive Telegram bot with personalized notifications
   - `/notes` - List all events with notes
   - `/near <city>` - Find events near a specific city (e.g., `/near Las Vegas`)
   - `/unsubscribe all` - Unsubscribe from all states with confirmation
+  - `/notify-removals on/off` - Toggle removal notifications
 - **Event Change Detection** - Events tracked with StableKey (SHA1 of state + normalized title)
 - **Change Notifications** - Detects when event dates/titles/cities change (infrastructure complete)
 - **Event Notes** - Personal notes stored in EventNotes map in UserPreferences
@@ -126,9 +140,13 @@ The project includes an interactive Telegram bot with personalized notifications
 - `Event.StableKey` - New field for tracking events across detail changes
 - `UserPreferences.EventNotes` - Map of event ID → note text
 - `UserPreferences.NotifyOnChanges` - Flag for change notifications (default: true)
+- `UserPreferences.NotifyOnRemoval` - Flag for removal notifications (default: true)
 - `Snapshot.StableIndex` - Map of StableKey → Event ID
 - `Snapshot.ChangeLog` - Array of recent EventChange objects
+- `Snapshot.RemovedEvents` - Map of recently removed events (kept for 30 days)
 - `Snapshot.CourseCache` - 30-day cache for golf course information
+- `DiffResult.RemovedEvents` - Array of events removed since last check
+- `EventChange.ChangeType` - Now includes "removed" type
 
 ### Local Development
 
