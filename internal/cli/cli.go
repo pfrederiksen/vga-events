@@ -254,8 +254,19 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Filter events by state before saving snapshot
 	eventsToSave := filterEventsByState(currentEvents, state)
 
-	// Save updated snapshot with only the filtered events
-	if err := store.CreateSnapshotFromEvents(eventsToSave, state); err != nil {
+	// Create new snapshot with filtered events
+	newSnapshot := event.CreateSnapshot(eventsToSave, time.Now().UTC().Format(time.RFC3339))
+
+	// Store removed events in snapshot (kept for 30 days)
+	if len(diff.RemovedEvents) > 0 {
+		newSnapshot.StoreRemovedEvents(diff.RemovedEvents)
+	}
+
+	// Clean up old removed events (>30 days old)
+	newSnapshot.CleanupRemovedEvents()
+
+	// Save updated snapshot
+	if err := store.SaveSnapshot(newSnapshot, state); err != nil {
 		return fmt.Errorf("saving snapshot: %w", err)
 	}
 
@@ -265,9 +276,10 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	// Prepare output
 	result := &OutputResult{
-		CheckedAt:  time.Now().UTC(),
-		NewEvents:  diff.NewEvents,
-		EventCount: len(diff.NewEvents),
+		CheckedAt:     time.Now().UTC(),
+		NewEvents:     diff.NewEvents,
+		RemovedEvents: diff.RemovedEvents,
+		EventCount:    len(diff.NewEvents),
 	}
 
 	// Determine states checked

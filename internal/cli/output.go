@@ -20,12 +20,13 @@ const (
 
 // OutputResult contains data to be output
 type OutputResult struct {
-	CheckedAt  time.Time                 `json:"checked_at"`
-	States     []string                  `json:"states"`
-	NewEvents  []*event.Event            `json:"new_events"`
-	EventCount int                       `json:"event_count"`
-	ByState    map[string][]*event.Event `json:"by_state,omitempty"`
-	ShowAll    bool                      `json:"show_all,omitempty"`
+	CheckedAt     time.Time                 `json:"checked_at"`
+	States        []string                  `json:"states"`
+	NewEvents     []*event.Event            `json:"new_events"`
+	RemovedEvents []*event.Event            `json:"removed_events,omitempty"`
+	EventCount    int                       `json:"event_count"`
+	ByState       map[string][]*event.Event `json:"by_state,omitempty"`
+	ShowAll       bool                      `json:"show_all,omitempty"`
 }
 
 // WriteOutput writes the result in the specified format

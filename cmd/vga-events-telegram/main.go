@@ -14,17 +14,20 @@ import (
 )
 
 var (
-	botToken         = flag.String("bot-token", os.Getenv("TELEGRAM_BOT_TOKEN"), "Telegram bot token (or env: TELEGRAM_BOT_TOKEN)")
-	chatID           = flag.String("chat-id", os.Getenv("TELEGRAM_CHAT_ID"), "Telegram chat ID (or env: TELEGRAM_CHAT_ID)")
-	golfCourseAPIKey = flag.String("golf-api-key", os.Getenv("GOLF_COURSE_API_KEY"), "Golf Course API key (or env: GOLF_COURSE_API_KEY)")
-	eventsFile       = flag.String("events-file", "", "Path to events JSON file (or read from stdin)")
-	dryRun           = flag.Bool("dry-run", false, "Print messages without sending")
-	maxMessages      = flag.Int("max-messages", 10, "Maximum number of messages to send")
-	stateFilter      = flag.String("state", "", "Only send messages for this state")
-	hidePast         = flag.Bool("hide-past", true, "Filter out past events (default: true)")
-	daysAhead        = flag.Int("days-ahead", 0, "Only show events within N days (0 = disabled)")
-	checkReminders   = flag.Bool("check-reminders", false, "Check if event matches reminder days (exits 0 if match, 1 if no match)")
-	reminderDays     = flag.Int("reminder-days", 0, "Number of days before event to send reminder (used with --check-reminders)")
+	botToken            = flag.String("bot-token", os.Getenv("TELEGRAM_BOT_TOKEN"), "Telegram bot token (or env: TELEGRAM_BOT_TOKEN)")
+	chatID              = flag.String("chat-id", os.Getenv("TELEGRAM_CHAT_ID"), "Telegram chat ID (or env: TELEGRAM_CHAT_ID)")
+	golfCourseAPIKey    = flag.String("golf-api-key", os.Getenv("GOLF_COURSE_API_KEY"), "Golf Course API key (or env: GOLF_COURSE_API_KEY)")
+	eventsFile          = flag.String("events-file", "", "Path to events JSON file (or read from stdin)")
+	dryRun              = flag.Bool("dry-run", false, "Print messages without sending")
+	maxMessages         = flag.Int("max-messages", 10, "Maximum number of messages to send")
+	stateFilter         = flag.String("state", "", "Only send messages for this state")
+	hidePast            = flag.Bool("hide-past", true, "Filter out past events (default: true)")
+	daysAhead           = flag.Int("days-ahead", 0, "Only show events within N days (0 = disabled)")
+	checkReminders      = flag.Bool("check-reminders", false, "Check if event matches reminder days (exits 0 if match, 1 if no match)")
+	reminderDays        = flag.Int("reminder-days", 0, "Number of days before event to send reminder (used with --check-reminders)")
+	removalNotification = flag.Bool("removal-notification", false, "Send removal notifications (reads from removed_events field)")
+	eventStatus         = flag.String("event-status", "", "Event status for removal notification (registered/interested/maybe)")
+	eventNote           = flag.String("event-note", "", "User's note for the event (for removal notifications)")
 )
 
 // filterByState filters events by state code
@@ -103,7 +106,8 @@ func readEvents(filePath string) ([]*event.Event, error) {
 	}
 
 	var result struct {
-		NewEvents []*event.Event `json:"new_events"`
+		NewEvents     []*event.Event `json:"new_events"`
+		RemovedEvents []*event.Event `json:"removed_events"`
 	}
 
 	decoder := json.NewDecoder(reader)
@@ -111,6 +115,10 @@ func readEvents(filePath string) ([]*event.Event, error) {
 		return nil, fmt.Errorf("parsing JSON: %w", err)
 	}
 
+	// Return appropriate events based on mode
+	if *removalNotification {
+		return result.RemovedEvents, nil
+	}
 	return result.NewEvents, nil
 }
 
@@ -155,6 +163,57 @@ func getCourseDetailsForEvent(client *course.Client, evt *event.Event) *telegram
 	return &telegram.CourseDetails{
 		Name: courseInfo.GetDisplayName(),
 		Tees: tees,
+	}
+}
+
+// handleDryRun handles dry run mode output
+func handleDryRun(events []*event.Event) {
+	notificationType := "new event"
+	if *removalNotification {
+		notificationType = "removal"
+	} else if *checkReminders {
+		notificationType = "reminder"
+	}
+
+	fmt.Printf("DRY RUN MODE - Would send %d %s notification(s):\n\n", len(events), notificationType)
+
+	// Initialize Golf Course API client once if key is provided
+	var courseClient *course.Client
+	if *golfCourseAPIKey != "" {
+		courseClient = course.NewClient(*golfCourseAPIKey)
+		fmt.Printf("Golf Course API enabled for dry run\n\n")
+	}
+
+	for i, evt := range events {
+		var msg string
+		var hasKeyboard bool
+
+		if *removalNotification {
+			if *eventStatus != "" {
+				msg = telegram.FormatRemovedEvent(evt, *eventStatus, *eventNote)
+				fmt.Printf("--- Removal Message %d/%d (High Urgency) ---\n", i+1, len(events))
+			} else {
+				msg = telegram.FormatRemovedEventGeneral(evt)
+				fmt.Printf("--- Removal Message %d/%d (Low Urgency) ---\n", i+1, len(events))
+			}
+			hasKeyboard = false
+		} else {
+			courseDetails := getCourseDetailsForEvent(courseClient, evt)
+			msg, _ = telegram.FormatEventWithStatusAndCourse(evt, courseDetails, "", "", "", nil)
+			fmt.Printf("--- Message %d/%d ---\n", i+1, len(events))
+			if courseDetails != nil {
+				fmt.Printf("Course info: %s (%d tee options)\n", courseDetails.Name, len(courseDetails.Tees))
+			}
+			hasKeyboard = true
+		}
+
+		fmt.Println(msg)
+		fmt.Printf("\n(Length: %d characters)\n", len(msg))
+		if hasKeyboard {
+			fmt.Printf("Buttons: 📅 Calendar, ⭐ Interested, ✅ Registered, 🤔 Maybe, ❌ Skip\n\n")
+		} else {
+			fmt.Printf("No interactive buttons\n\n")
+		}
 	}
 }
 
@@ -204,27 +263,7 @@ func main() {
 
 	// Dry run mode
 	if *dryRun {
-		// Initialize Golf Course API client if key is provided
-		var courseClient *course.Client
-		if *golfCourseAPIKey != "" {
-			courseClient = course.NewClient(*golfCourseAPIKey)
-			fmt.Printf("Golf Course API enabled for dry run\n\n")
-		}
-
-		fmt.Printf("DRY RUN MODE - Would send %d messages:\n\n", len(events))
-		for i, evt := range events {
-			courseDetails := getCourseDetailsForEvent(courseClient, evt)
-
-			msg, keyboard := telegram.FormatEventWithStatusAndCourse(evt, courseDetails, "", "", "", nil)
-			fmt.Printf("--- Message %d/%d ---\n", i+1, len(events))
-			fmt.Println(msg)
-			fmt.Printf("\n(Length: %d characters)\n", len(msg))
-			if courseDetails != nil {
-				fmt.Printf("Course info: %s (%d tee options)\n", courseDetails.Name, len(courseDetails.Tees))
-			}
-			fmt.Printf("Buttons: 📅 Calendar, ⭐ Interested, ✅ Registered, 🤔 Maybe, ❌ Skip\n\n")
-			_ = keyboard // keyboard is used but we're showing simplified output
-		}
+		handleDryRun(events)
 		os.Exit(0)
 	}
 
@@ -257,38 +296,56 @@ func main() {
 		var msg string
 		var keyboard *telegram.InlineKeyboardMarkup
 
-		// Look up course information if Golf Course API is enabled
-		courseDetails := getCourseDetailsForEvent(courseClient, evt)
-		if courseDetails != nil {
-			fmt.Printf("Found course info for %s: %s (%d tee options)\n",
-				evt.Title, courseDetails.Name, len(courseDetails.Tees))
-		}
-
-		// Use reminder format if in reminder mode
-		if *checkReminders {
+		// Format message based on notification type
+		if *removalNotification {
+			// Removal notification - check if user had event tracked
+			if *eventStatus != "" {
+				// High urgency: user had this event tracked
+				msg = telegram.FormatRemovedEvent(evt, *eventStatus, *eventNote)
+			} else {
+				// Low urgency: user just subscribed to state
+				msg = telegram.FormatRemovedEventGeneral(evt)
+			}
+			// No keyboard for removal notifications
+			keyboard = nil
+		} else if *checkReminders {
+			// Reminder notification
 			msg, keyboard = telegram.FormatReminder(evt, *reminderDays)
 		} else {
+			// New event notification
+			// Look up course information if Golf Course API is enabled
+			courseDetails := getCourseDetailsForEvent(courseClient, evt)
+			if courseDetails != nil {
+				fmt.Printf("Found course info for %s: %s (%d tee options)\n",
+					evt.Title, courseDetails.Name, len(courseDetails.Tees))
+			}
 			// Use status keyboard with course info for new events
 			msg, keyboard = telegram.FormatEventWithStatusAndCourse(evt, courseDetails, "", "", "", nil)
 		}
 
-		if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
-			fmt.Fprintf(os.Stderr, "Error sending message for event %s: %v\n", evt.ID, err)
-			os.Exit(1)
+		// Send message
+		if keyboard != nil {
+			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending message for event %s: %v\n", evt.ID, err)
+				os.Exit(1)
+			}
+		} else {
+			if err := client.SendMessage(msg); err != nil {
+				fmt.Fprintf(os.Stderr, "Error sending message for event %s: %v\n", evt.ID, err)
+				os.Exit(1)
+			}
 		}
 
-		// Rate limiting: wait between messages (extra delay if looking up course info)
+		// Rate limiting: wait between messages
 		if i < len(events)-1 {
-			if courseClient != nil {
-				time.Sleep(2 * time.Second) // Longer delay when using API
-			} else {
-				time.Sleep(1 * time.Second)
-			}
+			time.Sleep(1 * time.Second)
 		}
 	}
 
 	messageType := "message"
-	if *checkReminders {
+	if *removalNotification {
+		messageType = "removal notification"
+	} else if *checkReminders {
 		messageType = "reminder"
 	}
 	fmt.Printf("Successfully sent %d %s(s)\n", len(events), messageType)

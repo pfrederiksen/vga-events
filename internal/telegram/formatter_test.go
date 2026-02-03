@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/pfrederiksen/vga-events/internal/event"
+	"github.com/pfrederiksen/vga-events/internal/preferences"
 )
 
 func TestFormatEvent(t *testing.T) {
@@ -477,4 +478,179 @@ func TestFormatReminder(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFormatRemovedEvent(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test-removed-1",
+		State:    "NV",
+		Title:    "Chimera Golf Club",
+		DateText: "Apr 04 2026",
+		City:     "Las Vegas",
+		Raw:      "NV - Chimera Golf Club - Las Vegas",
+	}
+
+	t.Run("high urgency with registered status", func(t *testing.T) {
+		msg := FormatRemovedEvent(evt, preferences.EventStatusRegistered, "")
+
+		// Check for high urgency indicator
+		if !strings.Contains(msg, "⚠️") {
+			t.Error("expected high urgency warning emoji")
+		}
+
+		// Check for status indicator
+		if !strings.Contains(msg, "✅") || !strings.Contains(msg, "registered") {
+			t.Error("expected registered status indicator")
+		}
+
+		// Check for event details
+		if !strings.Contains(msg, "NV") {
+			t.Error("expected state code")
+		}
+		if !strings.Contains(msg, "Chimera Golf Club") {
+			t.Error("expected course name")
+		}
+		if !strings.Contains(msg, "Apr") || !strings.Contains(msg, "2026") {
+			t.Error("expected formatted date")
+		}
+		if !strings.Contains(msg, "Las Vegas") {
+			t.Error("expected city")
+		}
+
+		// Check for explanation
+		if !strings.Contains(msg, "no longer listed") {
+			t.Error("expected removal explanation")
+		}
+	})
+
+	t.Run("high urgency with interested status", func(t *testing.T) {
+		msg := FormatRemovedEvent(evt, preferences.EventStatusInterested, "")
+
+		if !strings.Contains(msg, "⭐") || !strings.Contains(msg, "interested") {
+			t.Error("expected interested status indicator")
+		}
+	})
+
+	t.Run("high urgency with maybe status", func(t *testing.T) {
+		msg := FormatRemovedEvent(evt, preferences.EventStatusMaybe, "")
+
+		if !strings.Contains(msg, "🤔") || !strings.Contains(msg, "maybe") {
+			t.Error("expected maybe status indicator")
+		}
+	})
+
+	t.Run("includes user note", func(t *testing.T) {
+		note := "Early tee time, bringing friends"
+		msg := FormatRemovedEvent(evt, preferences.EventStatusRegistered, note)
+
+		if !strings.Contains(msg, "📝") {
+			t.Error("expected note emoji")
+		}
+		if !strings.Contains(msg, note) {
+			t.Error("expected note text to be included")
+		}
+	})
+
+	t.Run("includes hashtags", func(t *testing.T) {
+		msg := FormatRemovedEvent(evt, preferences.EventStatusRegistered, "")
+
+		if !strings.Contains(msg, "#VGAGolf") {
+			t.Error("expected #VGAGolf hashtag")
+		}
+		if !strings.Contains(msg, "#EventCancelled") {
+			t.Error("expected #EventCancelled hashtag")
+		}
+		if !strings.Contains(msg, "#NV") {
+			t.Error("expected state hashtag")
+		}
+	})
+}
+
+func TestFormatRemovedEventGeneral(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test-removed-2",
+		State:    "CA",
+		Title:    "Pebble Beach Golf Links",
+		DateText: "May 15 2026",
+		City:     "Monterey",
+		Raw:      "CA - Pebble Beach Golf Links - Monterey",
+	}
+
+	t.Run("low urgency notification", func(t *testing.T) {
+		msg := FormatRemovedEventGeneral(evt)
+
+		// Check for low urgency indicator
+		if !strings.Contains(msg, "ℹ️") {
+			t.Error("expected info emoji for low urgency")
+		}
+
+		// Should NOT have high urgency warning
+		if strings.Contains(msg, "⚠️") {
+			t.Error("did not expect high urgency warning for general notification")
+		}
+
+		// Check for event details
+		if !strings.Contains(msg, "CA") {
+			t.Error("expected state code")
+		}
+		if !strings.Contains(msg, "Pebble Beach Golf Links") {
+			t.Error("expected course name")
+		}
+		if !strings.Contains(msg, "May") || !strings.Contains(msg, "2026") {
+			t.Error("expected formatted date")
+		}
+		if !strings.Contains(msg, "Monterey") {
+			t.Error("expected city")
+		}
+
+		// Check for brief explanation
+		if !strings.Contains(msg, "removed") {
+			t.Error("expected removal explanation")
+		}
+
+		// Should NOT have status indicators
+		if strings.Contains(msg, "✅") || strings.Contains(msg, "⭐") || strings.Contains(msg, "🤔") {
+			t.Error("did not expect status indicators in general notification")
+		}
+
+		// Should NOT have note section
+		if strings.Contains(msg, "📝") {
+			t.Error("did not expect note section in general notification")
+		}
+	})
+
+	t.Run("includes hashtags", func(t *testing.T) {
+		msg := FormatRemovedEventGeneral(evt)
+
+		if !strings.Contains(msg, "#VGAGolf") {
+			t.Error("expected #VGAGolf hashtag")
+		}
+		if !strings.Contains(msg, "#EventCancelled") {
+			t.Error("expected #EventCancelled hashtag")
+		}
+		if !strings.Contains(msg, "#CA") {
+			t.Error("expected state hashtag")
+		}
+	})
+
+	t.Run("handles missing city", func(t *testing.T) {
+		evtNoCity := &event.Event{
+			ID:       "test-removed-3",
+			State:    "TX",
+			Title:    "Dallas Country Club",
+			DateText: "Jun 1 2026",
+			City:     "",
+			Raw:      "TX - Dallas Country Club",
+		}
+
+		msg := FormatRemovedEventGeneral(evtNoCity)
+
+		// Should still format correctly without city
+		if !strings.Contains(msg, "Dallas Country Club") {
+			t.Error("expected course name")
+		}
+		if !strings.Contains(msg, "TX") {
+			t.Error("expected state code")
+		}
+	})
 }

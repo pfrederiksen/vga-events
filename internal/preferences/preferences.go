@@ -56,12 +56,16 @@ type UserPreferences struct {
 
 	// Change notifications (v0.5.0 Enhancement #3)
 	// Whether to be notified when tracked events change (date, title, city)
-	NotifyOnChanges bool `json:"notify_on_changes,omitempty"` // Default: true
+	NotifyOnChanges bool `json:"notify_on_changes"` // Default: true
+
+	// Removal notifications
+	// Whether to be notified when events are removed from the VGA website
+	NotifyOnRemoval bool `json:"notify_on_removal"` // Default: true
 
 	// Weekly statistics (v0.5.0 Enhancement #4)
 	WeeklyStats  *WeeklyStats            `json:"weekly_stats,omitempty"`
 	StatsHistory map[string]*WeeklyStats `json:"stats_history,omitempty"` // week key → stats
-	EnableStats  bool                    `json:"enable_stats,omitempty"`  // Default: true
+	EnableStats  bool                    `json:"enable_stats"`            // Default: true
 
 	// Friends and sharing (v0.5.0 Enhancement #7)
 	FriendChatIDs      []string            `json:"friend_chat_ids,omitempty"`     // List of friend chat IDs
@@ -132,6 +136,10 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		if !user.NotifyOnChanges && len(user.EventStatuses) > 0 {
 			user.NotifyOnChanges = true
 		}
+		// Migration: enable removal notifications for existing users
+		if !user.NotifyOnRemoval && len(user.States) > 0 {
+			user.NotifyOnRemoval = true
+		}
 		// Migration: initialize weekly stats for existing users
 		if user.WeeklyStats == nil {
 			user.WeeklyStats = NewWeeklyStats()
@@ -176,6 +184,7 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		ReminderDays:       []int{}, // No reminders by default, user can configure
 		EventNotes:         make(map[string]string),
 		NotifyOnChanges:    true,             // New feature: notify about event changes
+		NotifyOnRemoval:    true,             // New feature: notify about event removals
 		WeeklyStats:        NewWeeklyStats(), // New feature: track weekly stats
 		StatsHistory:       make(map[string]*WeeklyStats),
 		EnableStats:        true,       // Enable stats tracking by default

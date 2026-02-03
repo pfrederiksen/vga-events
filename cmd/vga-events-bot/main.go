@@ -908,6 +908,13 @@ Please provide a search keyword.
 	case "/reminders":
 		return handleRemindersWithKeyboard(prefs, chatID, botToken, dryRun)
 
+	case "/notify-removals":
+		arg := ""
+		if len(parts) >= 2 {
+			arg = parts[1]
+		}
+		return handleNotifyRemovals(prefs, chatID, arg, modified)
+
 	case "/bulk":
 		return handleBulkWithKeyboard(prefs, chatID, botToken, dryRun)
 
@@ -954,6 +961,7 @@ I help you track VGA Golf events in your favorite states!
 /note - Add a note to an event 📝
 /notes - List all events with notes 📋
 /reminders - Configure event reminders 🔔
+/notify-removals - Toggle removal notifications ⚠️
 /stats - View your engagement statistics 📊
 /bulk - Bulk actions for multiple events 🔧
 /export-calendar - Download all events as .ics file 📅
@@ -2666,4 +2674,47 @@ func archiveWeeklyStatsForAllUsers(prefs preferences.Preferences, storage *prefe
 	}
 
 	fmt.Printf("✅ Successfully archived stats for %d user(s)\n", archivedCount)
+}
+
+// handleNotifyRemovals toggles the removal notification setting
+func handleNotifyRemovals(prefs preferences.Preferences, chatID, arg string, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+
+	if arg == "" {
+		// Show current status
+		status := "disabled"
+		emoji := "❌"
+		if user.NotifyOnRemoval {
+			status = "enabled"
+			emoji = "✅"
+		}
+		return fmt.Sprintf(`🔔 <b>Removal Notifications</b>
+
+%s Currently: <b>%s</b>
+
+When events are removed or cancelled from the VGA website, you can be notified.
+
+• Events you're <b>registered</b> for → High priority notification ⚠️
+• Events in your subscribed states → Low priority notification ℹ️
+
+<b>Usage:</b>
+• <code>/notify-removals on</code> - Enable notifications
+• <code>/notify-removals off</code> - Disable notifications`, emoji, status), nil
+	}
+
+	// Toggle setting
+	switch strings.ToLower(arg) {
+	case "on", "enable", "yes":
+		user.NotifyOnRemoval = true
+		*modified = true
+		return "✅ Removal notifications <b>enabled</b>\n\nYou'll be notified when events are removed from the VGA website.", nil
+
+	case "off", "disable", "no":
+		user.NotifyOnRemoval = false
+		*modified = true
+		return "❌ Removal notifications <b>disabled</b>\n\nYou won't be notified about removed events.", nil
+
+	default:
+		return "❌ Invalid option. Use:\n• <code>/notify-removals on</code>\n• <code>/notify-removals off</code>", nil
+	}
 }
