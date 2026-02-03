@@ -166,6 +166,57 @@ func getCourseDetailsForEvent(client *course.Client, evt *event.Event) *telegram
 	}
 }
 
+// handleDryRun handles dry run mode output
+func handleDryRun(events []*event.Event) {
+	notificationType := "new event"
+	if *removalNotification {
+		notificationType = "removal"
+	} else if *checkReminders {
+		notificationType = "reminder"
+	}
+
+	fmt.Printf("DRY RUN MODE - Would send %d %s notification(s):\n\n", len(events), notificationType)
+
+	for i, evt := range events {
+		var msg string
+		var hasKeyboard bool
+
+		if *removalNotification {
+			if *eventStatus != "" {
+				msg = telegram.FormatRemovedEvent(evt, *eventStatus, *eventNote)
+				fmt.Printf("--- Removal Message %d/%d (High Urgency) ---\n", i+1, len(events))
+			} else {
+				msg = telegram.FormatRemovedEventGeneral(evt)
+				fmt.Printf("--- Removal Message %d/%d (Low Urgency) ---\n", i+1, len(events))
+			}
+			hasKeyboard = false
+		} else {
+			// Initialize Golf Course API client if key is provided
+			var courseClient *course.Client
+			if *golfCourseAPIKey != "" && i == 0 {
+				courseClient = course.NewClient(*golfCourseAPIKey)
+				fmt.Printf("Golf Course API enabled for dry run\n\n")
+			}
+
+			courseDetails := getCourseDetailsForEvent(courseClient, evt)
+			msg, _ = telegram.FormatEventWithStatusAndCourse(evt, courseDetails, "", "", "", nil)
+			fmt.Printf("--- Message %d/%d ---\n", i+1, len(events))
+			if courseDetails != nil {
+				fmt.Printf("Course info: %s (%d tee options)\n", courseDetails.Name, len(courseDetails.Tees))
+			}
+			hasKeyboard = true
+		}
+
+		fmt.Println(msg)
+		fmt.Printf("\n(Length: %d characters)\n", len(msg))
+		if hasKeyboard {
+			fmt.Printf("Buttons: 📅 Calendar, ⭐ Interested, ✅ Registered, 🤔 Maybe, ❌ Skip\n\n")
+		} else {
+			fmt.Printf("No interactive buttons\n\n")
+		}
+	}
+}
+
 func main() {
 	flag.Parse()
 
@@ -212,52 +263,7 @@ func main() {
 
 	// Dry run mode
 	if *dryRun {
-		notificationType := "new event"
-		if *removalNotification {
-			notificationType = "removal"
-		} else if *checkReminders {
-			notificationType = "reminder"
-		}
-
-		fmt.Printf("DRY RUN MODE - Would send %d %s notification(s):\n\n", len(events), notificationType)
-		for i, evt := range events {
-			var msg string
-			var hasKeyboard bool
-
-			if *removalNotification {
-				if *eventStatus != "" {
-					msg = telegram.FormatRemovedEvent(evt, *eventStatus, *eventNote)
-					fmt.Printf("--- Removal Message %d/%d (High Urgency) ---\n", i+1, len(events))
-				} else {
-					msg = telegram.FormatRemovedEventGeneral(evt)
-					fmt.Printf("--- Removal Message %d/%d (Low Urgency) ---\n", i+1, len(events))
-				}
-				hasKeyboard = false
-			} else {
-				// Initialize Golf Course API client if key is provided
-				var courseClient *course.Client
-				if *golfCourseAPIKey != "" && i == 0 {
-					courseClient = course.NewClient(*golfCourseAPIKey)
-					fmt.Printf("Golf Course API enabled for dry run\n\n")
-				}
-
-				courseDetails := getCourseDetailsForEvent(courseClient, evt)
-				msg, _ = telegram.FormatEventWithStatusAndCourse(evt, courseDetails, "", "", "", nil)
-				fmt.Printf("--- Message %d/%d ---\n", i+1, len(events))
-				if courseDetails != nil {
-					fmt.Printf("Course info: %s (%d tee options)\n", courseDetails.Name, len(courseDetails.Tees))
-				}
-				hasKeyboard = true
-			}
-
-			fmt.Println(msg)
-			fmt.Printf("\n(Length: %d characters)\n", len(msg))
-			if hasKeyboard {
-				fmt.Printf("Buttons: 📅 Calendar, ⭐ Interested, ✅ Registered, 🤔 Maybe, ❌ Skip\n\n")
-			} else {
-				fmt.Printf("No interactive buttons\n\n")
-			}
-		}
+		handleDryRun(events)
 		os.Exit(0)
 	}
 

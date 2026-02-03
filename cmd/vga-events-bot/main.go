@@ -2675,6 +2675,7 @@ func archiveWeeklyStatsForAllUsers(prefs preferences.Preferences, storage *prefe
 
 	fmt.Printf("✅ Successfully archived stats for %d user(s)\n", archivedCount)
 }
+
 // handleNotifyRemovals toggles the removal notification setting
 func handleNotifyRemovals(prefs preferences.Preferences, chatID, arg string, modified *bool) (string, []*event.Event) {
 	user := prefs.GetUser(chatID)
