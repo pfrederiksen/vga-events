@@ -82,20 +82,46 @@ The project includes an interactive Telegram bot with personalized notifications
 
 **Storage:**
 - User preferences stored in private GitHub Gist (JSON)
-- Event snapshots stored in GitHub Actions cache
+- Optional AES-256-GCM encryption for sensitive data
+- Event snapshots stored in GitHub Actions cache (secure, owner-only permissions)
+- Local snapshots use 0600 permissions (owner read/write only)
 - No database needed!
 
 ### Components
 
 1. **internal/telegram** - Telegram API client (send messages)
-2. **internal/preferences** - User preference management + Gist storage
-3. **cmd/vga-events-bot** - Command processor (handles /subscribe, etc.)
-4. **cmd/vga-events-telegram** - Notification sender
-5. **.github/workflows/telegram-bot-commands.yml** - Command processing
-6. **.github/workflows/telegram-bot.yml** - Personalized notifications
-7. **.github/workflows/telegram-daily-digest.yml** - Daily digest delivery
-8. **.github/workflows/telegram-weekly-digest.yml** - Weekly digest delivery
-9. **.github/workflows/telegram-reminders.yml** - Event reminder delivery
+2. **internal/preferences** - User preference management + Gist storage with encryption
+3. **internal/crypto** - AES-256-GCM encryption for sensitive data
+4. **cmd/vga-events-bot** - Command processor (handles /subscribe, etc.) with rate limiting
+5. **cmd/vga-events-telegram** - Notification sender
+6. **.github/workflows/telegram-bot-commands.yml** - Command processing
+7. **.github/workflows/telegram-bot.yml** - Personalized notifications
+8. **.github/workflows/telegram-daily-digest.yml** - Daily digest delivery
+9. **.github/workflows/telegram-weekly-digest.yml** - Weekly digest delivery
+10. **.github/workflows/telegram-reminders.yml** - Event reminder delivery
+
+### Security Features
+
+**Rate Limiting:**
+- Per-user rate limiting: 10 commands/minute using sliding window algorithm
+- Prevents command spam and DoS attempts
+- Automatic cleanup to prevent memory growth
+
+**Data Protection:**
+- Local snapshot files use 0600 permissions (owner-only access)
+- Optional AES-256-GCM encryption for sensitive Gist data
+- PBKDF2 key derivation with 100,000 iterations
+- Encrypts: event notes, event statuses, invite codes
+- Backward compatible with unencrypted data
+
+**Input Validation:**
+- Length limits: notes (500 chars), city names (100 chars), search keywords (100 chars)
+- Control character sanitization
+- Validation before processing
+
+**Error Handling:**
+- Sanitized error messages (no sensitive API responses exposed)
+- Proper error wrapping for debugging
 
 ### Current Version: v0.6.0
 
@@ -165,7 +191,8 @@ echo '{}' | gh gist create --filename "vga-events-preferences.json" --desc "VGA 
 export TELEGRAM_BOT_TOKEN=your_bot_token
 export TELEGRAM_GIST_ID=your_gist_id
 export TELEGRAM_GITHUB_TOKEN=your_github_token
-export GOLF_COURSE_API_KEY=your_golf_api_key  # Optional: enables course info
+export GOLF_COURSE_API_KEY=your_golf_api_key        # Optional: enables course info
+export TELEGRAM_ENCRYPTION_KEY=your_encryption_key  # Optional: enables data encryption
 ```
 
 **Test command processing:**
@@ -233,6 +260,7 @@ As users subscribe, it will look like:
 - `TELEGRAM_GIST_ID` - From create-gist.sh output
 - `TELEGRAM_GITHUB_TOKEN` - GitHub token with 'gist' scope
 - `GOLF_COURSE_API_KEY` - From golfcourseapi.com (optional, enables course info)
+- `TELEGRAM_ENCRYPTION_KEY` - Strong passphrase for data encryption (optional but recommended, enables AES-256 encryption)
 
 ### Bot Commands
 

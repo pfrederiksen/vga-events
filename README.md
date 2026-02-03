@@ -14,13 +14,14 @@ A simple, reliable CLI tool to check for newly-added VGA Golf state events witho
 - JSON or text output formats
 - Exit codes for easy scripting
 
-### Telegram Bot (v0.5.2)
-- **Golf course information** - Detailed course data with all tee options, par, yardage, slope, and ratings (v0.5.0-v0.5.2)
+### Telegram Bot (v0.6.0+)
+- **Security features** - Rate limiting, data encryption, input validation
+- **Golf course information** - Detailed course data with all tee options, par, yardage, slope, and ratings
 - **Personalized notifications** - Each user gets their own subscriptions
-- **Manual checks** - `/check` command to instantly check for new events (v0.5.2)
+- **Manual checks** - `/check` command to instantly check for new events
 - **Event tracking** - Mark events as interested/registered/maybe/skip
-- **Event notes** - Add personal notes to events (v0.5.0)
-- **Location search** - Find events near a specific city (v0.5.0)
+- **Event notes** - Add personal notes to events (encrypted)
+- **Location search** - Find events near a specific city
 - **Event reminders** - Get reminded 1 day, 3 days, 1 week, or 2 weeks before events
 - **Digest modes** - Choose immediate, daily, or weekly notifications
 - **Calendar export** - Download events as .ics files
@@ -222,6 +223,7 @@ The bot runs on GitHub Actions - no server needed! It:
    - `TELEGRAM_BOT_TOKEN` - Your bot token from @BotFather
    - `TELEGRAM_GIST_ID` - The Gist ID from step 1
    - `TELEGRAM_GITHUB_TOKEN` - GitHub token with 'gist' scope
+   - `TELEGRAM_ENCRYPTION_KEY` - (Recommended) Strong passphrase for data encryption
    - `GOLF_COURSE_API_KEY` - (Optional) API key from golfcourseapi.com for course info
 
 3. The workflows will start running automatically:
@@ -237,7 +239,8 @@ For development or testing locally:
 export TELEGRAM_BOT_TOKEN=your_bot_token
 export TELEGRAM_GIST_ID=your_gist_id
 export TELEGRAM_GITHUB_TOKEN=your_github_token
-export GOLF_COURSE_API_KEY=your_golf_api_key  # Optional: enables course info
+export TELEGRAM_ENCRYPTION_KEY=your_strong_passphrase  # Recommended: enables data encryption
+export GOLF_COURSE_API_KEY=your_golf_api_key          # Optional: enables course info
 
 # Process bot commands manually
 ./vga-events-bot
@@ -246,11 +249,35 @@ export GOLF_COURSE_API_KEY=your_golf_api_key  # Optional: enables course info
 ./vga-events --check-state all --format json | ./vga-events-telegram --chat-id YOUR_CHAT_ID
 ```
 
+### Security Features
+
+The bot includes multiple security layers:
+
+**Rate Limiting:**
+- Per-user rate limiting (10 commands/minute) prevents spam and DoS attacks
+- Automatic cleanup to prevent memory growth
+
+**Data Encryption:**
+- Optional AES-256-GCM encryption for sensitive data (notes, event statuses, invite codes)
+- PBKDF2 key derivation with 100,000 iterations
+- Backward compatible with unencrypted data
+- Enable with `TELEGRAM_ENCRYPTION_KEY` environment variable
+
+**Input Validation:**
+- Length limits on all user inputs (notes: 500 chars, searches: 100 chars)
+- Control character sanitization
+- Validation before processing
+
+**Storage Security:**
+- Local snapshots use 0600 permissions (owner-only access)
+- GitHub Gist preferences stored privately
+- No sensitive data in error messages
+
 ### How It Works
 
 1. **User subscribes** via `/subscribe NV` command
 2. **Bot processes command** (runs every 15 minutes via GitHub Actions)
-3. **Preferences stored** in private GitHub Gist
+3. **Preferences stored** in private GitHub Gist (encrypted if key provided)
 4. **Event checking** runs hourly via GitHub Actions
 5. **Personalized notifications** sent only for subscribed states
 6. **Each user** receives only their relevant events
