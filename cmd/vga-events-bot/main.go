@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pfrederiksen/vga-events/internal/calendar"
@@ -33,6 +34,7 @@ var (
 	gistID           = flag.String("gist-id", os.Getenv("TELEGRAM_GIST_ID"), "GitHub Gist ID (or env: TELEGRAM_GIST_ID)")
 	githubToken      = flag.String("github-token", os.Getenv("TELEGRAM_GITHUB_TOKEN"), "GitHub token (or env: TELEGRAM_GITHUB_TOKEN)")
 	golfCourseAPIKey = flag.String("golf-api-key", os.Getenv("GOLF_COURSE_API_KEY"), "Golf Course API key (or env: GOLF_COURSE_API_KEY)")
+	encryptionKey    = flag.String("encryption-key", os.Getenv("TELEGRAM_ENCRYPTION_KEY"), "Encryption key for sensitive data (or env: TELEGRAM_ENCRYPTION_KEY)")
 	dryRun           = flag.Bool("dry-run", false, "Show what would be done without making changes")
 	loop             = flag.Bool("loop", false, "Run continuously with long polling (for real-time responses)")
 	loopDuration     = flag.Duration("loop-duration", 5*time.Hour+50*time.Minute, "Maximum duration for loop mode (default 5h50m)")
@@ -72,6 +74,145 @@ type Chat struct {
 	Type string `json:"type"`
 }
 
+// RateLimiter implements a simple sliding window rate limiter
+type RateLimiter struct {
+	mu       sync.Mutex
+	requests map[string][]time.Time
+	limit    int           // max requests
+	window   time.Duration // time window
+}
+
+// NewRateLimiter creates a new rate limiter
+func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
+	return &RateLimiter{
+		requests: make(map[string][]time.Time),
+		limit:    limit,
+		window:   window,
+	}
+}
+
+// Allow checks if a request from the given chatID should be allowed
+func (rl *RateLimiter) Allow(chatID string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+
+	// Get existing requests for this chat ID
+	timestamps := rl.requests[chatID]
+
+	// Remove timestamps older than the window
+	var validTimestamps []time.Time
+	for _, ts := range timestamps {
+		if ts.After(cutoff) {
+			validTimestamps = append(validTimestamps, ts)
+		}
+	}
+
+	// Check if limit exceeded
+	if len(validTimestamps) >= rl.limit {
+		return false
+	}
+
+	// Add current timestamp and update
+	validTimestamps = append(validTimestamps, now)
+	rl.requests[chatID] = validTimestamps
+
+	return true
+}
+
+// CleanupOldEntries removes expired entries to prevent memory growth
+func (rl *RateLimiter) CleanupOldEntries() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+
+	for chatID, timestamps := range rl.requests {
+		var validTimestamps []time.Time
+		for _, ts := range timestamps {
+			if ts.After(cutoff) {
+				validTimestamps = append(validTimestamps, ts)
+			}
+		}
+		if len(validTimestamps) == 0 {
+			delete(rl.requests, chatID)
+		} else {
+			rl.requests[chatID] = validTimestamps
+		}
+	}
+}
+
+// processUpdate handles a single Telegram update (message or callback) with rate limiting
+func processUpdate(update Update, prefs preferences.Preferences, prefsModified *bool, botToken string, dryRun bool, rateLimiter *RateLimiter) {
+	if update.CallbackQuery != nil {
+		// Handle callback query (button press)
+		chatID := fmt.Sprintf("%d", update.CallbackQuery.From.ID)
+
+		// Check rate limit
+		if !rateLimiter.Allow(chatID) {
+			fmt.Printf("Rate limit exceeded for chat %s\n", chatID)
+			sendResponse(botToken, chatID, "⚠️ Too many requests. Please wait a moment before trying again.", nil, dryRun)
+			return
+		}
+
+		handleCallbackQuery(prefs, update.CallbackQuery, prefsModified, botToken, dryRun)
+	} else if update.Message != nil {
+		// Handle text message
+		chatID := fmt.Sprintf("%d", update.Message.Chat.ID)
+		text := strings.TrimSpace(update.Message.Text)
+
+		fmt.Printf("Message from %s (chat %s): %s\n", update.Message.From.FirstName, chatID, text)
+
+		// Check rate limit
+		if !rateLimiter.Allow(chatID) {
+			fmt.Printf("Rate limit exceeded for chat %s\n", chatID)
+			sendResponse(botToken, chatID, "⚠️ Too many requests. Please wait a moment before trying again.", nil, dryRun)
+			return
+		}
+
+		// Parse command
+		response, initialEvents := processCommand(prefs, chatID, text, prefsModified, botToken, dryRun)
+
+		// Send response and initial events
+		sendResponse(botToken, chatID, response, initialEvents, dryRun)
+	}
+}
+
+// validateUserInput validates and sanitizes user-provided text input
+// Returns (sanitized text, error message)
+func validateUserInput(input string, maxLength int, fieldName string) (string, string) {
+	// Trim whitespace
+	input = strings.TrimSpace(input)
+
+	// Check length
+	if len(input) == 0 {
+		return "", fmt.Sprintf("❌ %s cannot be empty.", fieldName)
+	}
+
+	if len(input) > maxLength {
+		return "", fmt.Sprintf("❌ %s is too long (max %d characters, got %d).", fieldName, maxLength, len(input))
+	}
+
+	// Remove control characters (except newlines and tabs which are acceptable in notes)
+	var sanitized strings.Builder
+	for _, r := range input {
+		// Allow printable characters, spaces, newlines, tabs
+		if r >= 32 || r == '\n' || r == '\t' {
+			sanitized.WriteRune(r)
+		}
+	}
+
+	result := sanitized.String()
+	if len(result) == 0 {
+		return "", fmt.Sprintf("❌ %s contains only invalid characters.", fieldName)
+	}
+
+	return result, ""
+}
+
 func main() {
 	flag.Parse()
 
@@ -90,11 +231,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize storage
-	storage, err := preferences.NewGistStorage(*gistID, *githubToken)
+	// Initialize storage with encryption if key is provided
+	storage, err := preferences.NewGistStorageWithEncryption(*gistID, *githubToken, *encryptionKey)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error initializing storage: %v\n", err)
 		os.Exit(1)
+	}
+	if *encryptionKey != "" {
+		fmt.Println("Encryption enabled for sensitive data")
 	}
 
 	// Initialize Golf Course API client if key is provided
@@ -128,10 +272,22 @@ func main() {
 
 	fmt.Printf("Loaded preferences for %d users\n", len(prefs))
 
+	// Initialize rate limiter: 10 commands per minute per user
+	rateLimiter := NewRateLimiter(10, time.Minute)
+
+	// Start cleanup goroutine to prevent memory growth
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			rateLimiter.CleanupOldEntries()
+		}
+	}()
+
 	if *loop {
-		runLoop(storage, prefs, *botToken, *dryRun, *loopDuration)
+		runLoop(storage, prefs, *botToken, *dryRun, *loopDuration, rateLimiter)
 	} else {
-		runOnce(storage, prefs, *botToken, *dryRun)
+		runOnce(storage, prefs, *botToken, *dryRun, rateLimiter)
 	}
 }
 
@@ -175,7 +331,7 @@ func sendResponse(botToken, chatID, response string, initialEvents []*event.Even
 	}
 }
 
-func runLoop(storage *preferences.GistStorage, prefs preferences.Preferences, botToken string, dryRun bool, duration time.Duration) {
+func runLoop(storage *preferences.GistStorage, prefs preferences.Preferences, botToken string, dryRun bool, duration time.Duration, rateLimiter *RateLimiter) {
 	fmt.Printf("Starting long polling loop (will run for %v)...\n", duration)
 	startTime := time.Now()
 	offset := 0
@@ -206,22 +362,7 @@ func runLoop(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 
 		// Process each update
 		for _, update := range updates {
-			if update.CallbackQuery != nil {
-				// Handle callback query (button press)
-				handleCallbackQuery(prefs, update.CallbackQuery, &prefsModified, botToken, dryRun)
-			} else if update.Message != nil {
-				// Handle text message
-				chatID := fmt.Sprintf("%d", update.Message.Chat.ID)
-				text := strings.TrimSpace(update.Message.Text)
-
-				fmt.Printf("Message from %s (chat %s): %s\n", update.Message.From.FirstName, chatID, text)
-
-				// Parse command
-				response, initialEvents := processCommand(prefs, chatID, text, &prefsModified, botToken, dryRun)
-
-				// Send response and initial events
-				sendResponse(botToken, chatID, response, initialEvents, dryRun)
-			}
+			processUpdate(update, prefs, &prefsModified, botToken, dryRun, rateLimiter)
 
 			// Update offset to mark this update as processed
 			if update.UpdateID >= offset {
@@ -246,7 +387,7 @@ func runLoop(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 	fmt.Println("Long polling loop completed")
 }
 
-func runOnce(storage *preferences.GistStorage, prefs preferences.Preferences, botToken string, dryRun bool) {
+func runOnce(storage *preferences.GistStorage, prefs preferences.Preferences, botToken string, dryRun bool, rateLimiter *RateLimiter) {
 	// Get updates from Telegram
 	updates, err := getUpdates(botToken, 0)
 	if err != nil {
@@ -271,22 +412,7 @@ func runOnce(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 			maxUpdateID = update.UpdateID
 		}
 
-		if update.CallbackQuery != nil {
-			// Handle callback query (button press)
-			handleCallbackQuery(prefs, update.CallbackQuery, &prefsModified, botToken, dryRun)
-		} else if update.Message != nil {
-			// Handle text message
-			chatID := fmt.Sprintf("%d", update.Message.Chat.ID)
-			text := strings.TrimSpace(update.Message.Text)
-
-			fmt.Printf("Message from %s (chat %s): %s\n", update.Message.From.FirstName, chatID, text)
-
-			// Parse command
-			response, initialEvents := processCommand(prefs, chatID, text, &prefsModified, botToken, dryRun)
-
-			// Send response and initial events
-			sendResponse(botToken, chatID, response, initialEvents, dryRun)
-		}
+		processUpdate(update, prefs, &prefsModified, botToken, dryRun, rateLimiter)
 	}
 
 	// Save preferences if modified
@@ -857,6 +983,13 @@ Please provide a search keyword.
 		}
 		keyword := strings.Join(parts[1:], " ")
 		keyword = strings.Trim(keyword, `"'`) // Remove quotes if present
+
+		// Validate input
+		keyword, errMsg := validateUserInput(keyword, 100, "Search keyword")
+		if errMsg != "" {
+			return errMsg, nil
+		}
+
 		return handleSearch(prefs, chatID, keyword, botToken, dryRun, modified)
 
 	case "/export-calendar":
@@ -891,6 +1024,13 @@ Please provide a search keyword.
 
 		// Join remaining parts as note text
 		noteText := strings.Join(parts[2:], " ")
+
+		// Validate input
+		noteText, errMsg := validateUserInput(noteText, 500, "Note text")
+		if errMsg != "" {
+			return errMsg, nil
+		}
+
 		return handleAddNote(prefs, chatID, eventID, noteText, modified)
 
 	case "/notes":
@@ -903,6 +1043,13 @@ Please provide a search keyword.
 		// Join remaining parts as city name (supports multi-word cities)
 		cityName := strings.Join(parts[1:], " ")
 		cityName = strings.Trim(cityName, `"'`) // Remove quotes if present
+
+		// Validate input
+		cityName, errMsg := validateUserInput(cityName, 100, "City name")
+		if errMsg != "" {
+			return errMsg, nil
+		}
+
 		return handleNear(prefs, chatID, cityName, botToken, dryRun, modified)
 
 	case "/reminders":

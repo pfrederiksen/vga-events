@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
+
+	"github.com/pfrederiksen/vga-events/internal/crypto"
 )
 
 const (
@@ -20,15 +21,26 @@ type GistStorage struct {
 	gistID      string
 	githubToken string
 	httpClient  *http.Client
+	encryptor   *crypto.Encryptor
 }
 
 // NewGistStorage creates a new Gist-based storage
 func NewGistStorage(gistID, githubToken string) (*GistStorage, error) {
+	return NewGistStorageWithEncryption(gistID, githubToken, "")
+}
+
+// NewGistStorageWithEncryption creates a new Gist-based storage with optional encryption
+func NewGistStorageWithEncryption(gistID, githubToken, encryptionKey string) (*GistStorage, error) {
 	if gistID == "" {
 		return nil, fmt.Errorf("gist ID is required")
 	}
 	if githubToken == "" {
 		return nil, fmt.Errorf("GitHub token is required")
+	}
+
+	var encryptor *crypto.Encryptor
+	if encryptionKey != "" {
+		encryptor = crypto.NewEncryptor(encryptionKey)
 	}
 
 	return &GistStorage{
@@ -37,6 +49,7 @@ func NewGistStorage(gistID, githubToken string) (*GistStorage, error) {
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
+		encryptor: encryptor,
 	}, nil
 }
 
@@ -59,8 +72,8 @@ func (g *GistStorage) Load() (Preferences, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(body))
+		// Don't include response body in error to prevent information leakage
+		return nil, fmt.Errorf("GitHub API error (status %d)", resp.StatusCode)
 	}
 
 	var gistResp struct {
@@ -84,11 +97,33 @@ func (g *GistStorage) Load() (Preferences, error) {
 		return nil, fmt.Errorf("parsing preferences: %w", err)
 	}
 
+	// Decrypt sensitive fields if encryptor is configured
+	if g.encryptor != nil {
+		if err := g.decryptPreferences(prefs); err != nil {
+			return nil, fmt.Errorf("decrypting preferences: %w", err)
+		}
+	}
+
 	return prefs, nil
 }
 
 // Save updates the Gist with new preferences
 func (g *GistStorage) Save(prefs Preferences) error {
+	// Encrypt sensitive fields if encryptor is configured
+	if g.encryptor != nil {
+		// Create a copy to avoid modifying the original
+		prefsCopy := make(Preferences)
+		for chatID, userPrefs := range prefs {
+			// Deep copy user preferences
+			userPrefsCopy := *userPrefs
+			prefsCopy[chatID] = &userPrefsCopy
+		}
+		if err := g.encryptPreferences(prefsCopy); err != nil {
+			return fmt.Errorf("encrypting preferences: %w", err)
+		}
+		prefs = prefsCopy
+	}
+
 	prefsJSON, err := prefs.ToJSON()
 	if err != nil {
 		return fmt.Errorf("marshaling preferences: %w", err)
@@ -125,8 +160,8 @@ func (g *GistStorage) Save(prefs Preferences) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(body))
+		// Don't include response body in error to prevent information leakage
+		return fmt.Errorf("GitHub API error (status %d)", resp.StatusCode)
 	}
 
 	return nil
@@ -176,8 +211,8 @@ func CreateGist(githubToken, description string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(body))
+		// Don't include response body in error to prevent information leakage
+		return "", fmt.Errorf("GitHub API error (status %d)", resp.StatusCode)
 	}
 
 	var gistResp struct {
@@ -189,4 +224,52 @@ func CreateGist(githubToken, description string) (string, error) {
 	}
 
 	return gistResp.ID, nil
+}
+
+// transformSensitiveFields applies encryption/decryption to sensitive user preference fields
+func (g *GistStorage) transformSensitiveFields(prefs Preferences, mapTransform func(map[string]string) (map[string]string, error), stringTransform func(string) (string, error), operation string) error {
+	if g.encryptor == nil {
+		return nil
+	}
+
+	for _, userPrefs := range prefs {
+		// Transform event notes
+		if len(userPrefs.EventNotes) > 0 {
+			transformed, err := mapTransform(userPrefs.EventNotes)
+			if err != nil {
+				return fmt.Errorf("%s event notes: %w", operation, err)
+			}
+			userPrefs.EventNotes = transformed
+		}
+
+		// Transform event statuses
+		if len(userPrefs.EventStatuses) > 0 {
+			transformed, err := mapTransform(userPrefs.EventStatuses)
+			if err != nil {
+				return fmt.Errorf("%s event statuses: %w", operation, err)
+			}
+			userPrefs.EventStatuses = transformed
+		}
+
+		// Transform invite code
+		if userPrefs.InviteCode != "" {
+			transformed, err := stringTransform(userPrefs.InviteCode)
+			if err != nil {
+				return fmt.Errorf("%s invite code: %w", operation, err)
+			}
+			userPrefs.InviteCode = transformed
+		}
+	}
+
+	return nil
+}
+
+// encryptPreferences encrypts sensitive fields in all user preferences
+func (g *GistStorage) encryptPreferences(prefs Preferences) error {
+	return g.transformSensitiveFields(prefs, g.encryptor.EncryptMap, g.encryptor.Encrypt, "encrypting")
+}
+
+// decryptPreferences decrypts sensitive fields in all user preferences
+func (g *GistStorage) decryptPreferences(prefs Preferences) error {
+	return g.transformSensitiveFields(prefs, g.encryptor.DecryptMap, g.encryptor.Decrypt, "decrypting")
 }

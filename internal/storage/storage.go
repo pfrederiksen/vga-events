@@ -88,7 +88,8 @@ func (s *Storage) SaveSnapshot(snapshot *event.Snapshot, state string) error {
 		return fmt.Errorf("encoding snapshot: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	// Use 0600 (owner read/write only) to prevent other users from reading snapshot data
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("writing snapshot: %w", err)
 	}
 
