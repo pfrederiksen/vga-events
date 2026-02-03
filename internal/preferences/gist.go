@@ -226,78 +226,50 @@ func CreateGist(githubToken, description string) (string, error) {
 	return gistResp.ID, nil
 }
 
-// encryptPreferences encrypts sensitive fields in all user preferences
-func (g *GistStorage) encryptPreferences(prefs Preferences) error {
+// transformSensitiveFields applies encryption/decryption to sensitive user preference fields
+func (g *GistStorage) transformSensitiveFields(prefs Preferences, mapTransform func(map[string]string) (map[string]string, error), stringTransform func(string) (string, error), operation string) error {
 	if g.encryptor == nil {
 		return nil
 	}
 
 	for _, userPrefs := range prefs {
-		// Encrypt event notes
+		// Transform event notes
 		if len(userPrefs.EventNotes) > 0 {
-			encrypted, err := g.encryptor.EncryptMap(userPrefs.EventNotes)
+			transformed, err := mapTransform(userPrefs.EventNotes)
 			if err != nil {
-				return fmt.Errorf("encrypting event notes: %w", err)
+				return fmt.Errorf("%s event notes: %w", operation, err)
 			}
-			userPrefs.EventNotes = encrypted
+			userPrefs.EventNotes = transformed
 		}
 
-		// Encrypt event statuses
+		// Transform event statuses
 		if len(userPrefs.EventStatuses) > 0 {
-			encrypted, err := g.encryptor.EncryptMap(userPrefs.EventStatuses)
+			transformed, err := mapTransform(userPrefs.EventStatuses)
 			if err != nil {
-				return fmt.Errorf("encrypting event statuses: %w", err)
+				return fmt.Errorf("%s event statuses: %w", operation, err)
 			}
-			userPrefs.EventStatuses = encrypted
+			userPrefs.EventStatuses = transformed
 		}
 
-		// Encrypt invite code
+		// Transform invite code
 		if userPrefs.InviteCode != "" {
-			encrypted, err := g.encryptor.Encrypt(userPrefs.InviteCode)
+			transformed, err := stringTransform(userPrefs.InviteCode)
 			if err != nil {
-				return fmt.Errorf("encrypting invite code: %w", err)
+				return fmt.Errorf("%s invite code: %w", operation, err)
 			}
-			userPrefs.InviteCode = encrypted
+			userPrefs.InviteCode = transformed
 		}
 	}
 
 	return nil
 }
 
+// encryptPreferences encrypts sensitive fields in all user preferences
+func (g *GistStorage) encryptPreferences(prefs Preferences) error {
+	return g.transformSensitiveFields(prefs, g.encryptor.EncryptMap, g.encryptor.Encrypt, "encrypting")
+}
+
 // decryptPreferences decrypts sensitive fields in all user preferences
 func (g *GistStorage) decryptPreferences(prefs Preferences) error {
-	if g.encryptor == nil {
-		return nil
-	}
-
-	for _, userPrefs := range prefs {
-		// Decrypt event notes
-		if len(userPrefs.EventNotes) > 0 {
-			decrypted, err := g.encryptor.DecryptMap(userPrefs.EventNotes)
-			if err != nil {
-				return fmt.Errorf("decrypting event notes: %w", err)
-			}
-			userPrefs.EventNotes = decrypted
-		}
-
-		// Decrypt event statuses
-		if len(userPrefs.EventStatuses) > 0 {
-			decrypted, err := g.encryptor.DecryptMap(userPrefs.EventStatuses)
-			if err != nil {
-				return fmt.Errorf("decrypting event statuses: %w", err)
-			}
-			userPrefs.EventStatuses = decrypted
-		}
-
-		// Decrypt invite code
-		if userPrefs.InviteCode != "" {
-			decrypted, err := g.encryptor.Decrypt(userPrefs.InviteCode)
-			if err != nil {
-				return fmt.Errorf("decrypting invite code: %w", err)
-			}
-			userPrefs.InviteCode = decrypted
-		}
-	}
-
-	return nil
+	return g.transformSensitiveFields(prefs, g.encryptor.DecryptMap, g.encryptor.Decrypt, "decrypting")
 }

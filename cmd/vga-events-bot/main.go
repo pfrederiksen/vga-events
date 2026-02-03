@@ -145,6 +145,42 @@ func (rl *RateLimiter) CleanupOldEntries() {
 	}
 }
 
+// processUpdate handles a single Telegram update (message or callback) with rate limiting
+func processUpdate(update Update, prefs preferences.Preferences, prefsModified *bool, botToken string, dryRun bool, rateLimiter *RateLimiter) {
+	if update.CallbackQuery != nil {
+		// Handle callback query (button press)
+		chatID := fmt.Sprintf("%d", update.CallbackQuery.From.ID)
+
+		// Check rate limit
+		if !rateLimiter.Allow(chatID) {
+			fmt.Printf("Rate limit exceeded for chat %s\n", chatID)
+			sendResponse(botToken, chatID, "⚠️ Too many requests. Please wait a moment before trying again.", nil, dryRun)
+			return
+		}
+
+		handleCallbackQuery(prefs, update.CallbackQuery, prefsModified, botToken, dryRun)
+	} else if update.Message != nil {
+		// Handle text message
+		chatID := fmt.Sprintf("%d", update.Message.Chat.ID)
+		text := strings.TrimSpace(update.Message.Text)
+
+		fmt.Printf("Message from %s (chat %s): %s\n", update.Message.From.FirstName, chatID, text)
+
+		// Check rate limit
+		if !rateLimiter.Allow(chatID) {
+			fmt.Printf("Rate limit exceeded for chat %s\n", chatID)
+			sendResponse(botToken, chatID, "⚠️ Too many requests. Please wait a moment before trying again.", nil, dryRun)
+			return
+		}
+
+		// Parse command
+		response, initialEvents := processCommand(prefs, chatID, text, prefsModified, botToken, dryRun)
+
+		// Send response and initial events
+		sendResponse(botToken, chatID, response, initialEvents, dryRun)
+	}
+}
+
 // validateUserInput validates and sanitizes user-provided text input
 // Returns (sanitized text, error message)
 func validateUserInput(input string, maxLength int, fieldName string) (string, string) {
@@ -326,38 +362,7 @@ func runLoop(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 
 		// Process each update
 		for _, update := range updates {
-			if update.CallbackQuery != nil {
-				// Handle callback query (button press)
-				chatID := fmt.Sprintf("%d", update.CallbackQuery.From.ID)
-
-				// Check rate limit
-				if !rateLimiter.Allow(chatID) {
-					fmt.Printf("Rate limit exceeded for chat %s\n", chatID)
-					sendResponse(botToken, chatID, "⚠️ Too many requests. Please wait a moment before trying again.", nil, dryRun)
-					continue
-				}
-
-				handleCallbackQuery(prefs, update.CallbackQuery, &prefsModified, botToken, dryRun)
-			} else if update.Message != nil {
-				// Handle text message
-				chatID := fmt.Sprintf("%d", update.Message.Chat.ID)
-				text := strings.TrimSpace(update.Message.Text)
-
-				fmt.Printf("Message from %s (chat %s): %s\n", update.Message.From.FirstName, chatID, text)
-
-				// Check rate limit
-				if !rateLimiter.Allow(chatID) {
-					fmt.Printf("Rate limit exceeded for chat %s\n", chatID)
-					sendResponse(botToken, chatID, "⚠️ Too many requests. Please wait a moment before trying again.", nil, dryRun)
-					continue
-				}
-
-				// Parse command
-				response, initialEvents := processCommand(prefs, chatID, text, &prefsModified, botToken, dryRun)
-
-				// Send response and initial events
-				sendResponse(botToken, chatID, response, initialEvents, dryRun)
-			}
+			processUpdate(update, prefs, &prefsModified, botToken, dryRun, rateLimiter)
 
 			// Update offset to mark this update as processed
 			if update.UpdateID >= offset {
@@ -407,38 +412,7 @@ func runOnce(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 			maxUpdateID = update.UpdateID
 		}
 
-		if update.CallbackQuery != nil {
-			// Handle callback query (button press)
-			chatID := fmt.Sprintf("%d", update.CallbackQuery.From.ID)
-
-			// Check rate limit
-			if !rateLimiter.Allow(chatID) {
-				fmt.Printf("Rate limit exceeded for chat %s\n", chatID)
-				sendResponse(botToken, chatID, "⚠️ Too many requests. Please wait a moment before trying again.", nil, dryRun)
-				continue
-			}
-
-			handleCallbackQuery(prefs, update.CallbackQuery, &prefsModified, botToken, dryRun)
-		} else if update.Message != nil {
-			// Handle text message
-			chatID := fmt.Sprintf("%d", update.Message.Chat.ID)
-			text := strings.TrimSpace(update.Message.Text)
-
-			fmt.Printf("Message from %s (chat %s): %s\n", update.Message.From.FirstName, chatID, text)
-
-			// Check rate limit
-			if !rateLimiter.Allow(chatID) {
-				fmt.Printf("Rate limit exceeded for chat %s\n", chatID)
-				sendResponse(botToken, chatID, "⚠️ Too many requests. Please wait a moment before trying again.", nil, dryRun)
-				continue
-			}
-
-			// Parse command
-			response, initialEvents := processCommand(prefs, chatID, text, &prefsModified, botToken, dryRun)
-
-			// Send response and initial events
-			sendResponse(botToken, chatID, response, initialEvents, dryRun)
-		}
+		processUpdate(update, prefs, &prefsModified, botToken, dryRun, rateLimiter)
 	}
 
 	// Save preferences if modified
