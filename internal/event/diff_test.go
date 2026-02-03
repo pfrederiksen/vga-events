@@ -420,13 +420,13 @@ func TestSnapshotRemovedEventsStorage(t *testing.T) {
 	t.Run("cleans up old removed events", func(t *testing.T) {
 		snapshot := NewSnapshot()
 
-		// Create an old event (40 days ago)
+		// Create an old event (removed 40 days ago)
 		oldEvt := NewEvent("NV", "Old Event", "Apr 4 2026", "Las Vegas", "NV - Old Event - Las Vegas", "https://example.com")
-		oldEvt.FirstSeen = time.Now().AddDate(0, 0, -40)
+		oldEvt.RemovedAt = time.Now().AddDate(0, 0, -40)
 
-		// Create a recent event (10 days ago)
+		// Create a recent event (removed 10 days ago)
 		recentEvt := NewEvent("CA", "Recent Event", "May 15 2026", "San Francisco", "CA - Recent Event - San Francisco", "https://example.com")
-		recentEvt.FirstSeen = time.Now().AddDate(0, 0, -10)
+		recentEvt.RemovedAt = time.Now().AddDate(0, 0, -10)
 
 		snapshot.RemovedEvents[oldEvt.ID] = oldEvt
 		snapshot.RemovedEvents[recentEvt.ID] = recentEvt

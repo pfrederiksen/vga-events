@@ -56,16 +56,16 @@ type UserPreferences struct {
 
 	// Change notifications (v0.5.0 Enhancement #3)
 	// Whether to be notified when tracked events change (date, title, city)
-	NotifyOnChanges bool `json:"notify_on_changes,omitempty"` // Default: true
+	NotifyOnChanges bool `json:"notify_on_changes"` // Default: true
 
 	// Removal notifications
 	// Whether to be notified when events are removed from the VGA website
-	NotifyOnRemoval bool `json:"notify_on_removal,omitempty"` // Default: true
+	NotifyOnRemoval bool `json:"notify_on_removal"` // Default: true
 
 	// Weekly statistics (v0.5.0 Enhancement #4)
 	WeeklyStats  *WeeklyStats            `json:"weekly_stats,omitempty"`
 	StatsHistory map[string]*WeeklyStats `json:"stats_history,omitempty"` // week key → stats
-	EnableStats  bool                    `json:"enable_stats,omitempty"`  // Default: true
+	EnableStats  bool                    `json:"enable_stats"`            // Default: true
 
 	// Friends and sharing (v0.5.0 Enhancement #7)
 	FriendChatIDs      []string            `json:"friend_chat_ids,omitempty"`     // List of friend chat IDs

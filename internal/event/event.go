@@ -18,6 +18,7 @@ type Event struct {
 	Raw       string    `json:"raw"`
 	SourceURL string    `json:"source_url"`
 	FirstSeen time.Time `json:"first_seen"`
+	RemovedAt time.Time `json:"removed_at,omitempty"` // When event was removed from VGA website
 }
 
 // GenerateID creates a deterministic ID for an event based on stable fields

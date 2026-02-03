@@ -177,6 +177,13 @@ func handleDryRun(events []*event.Event) {
 
 	fmt.Printf("DRY RUN MODE - Would send %d %s notification(s):\n\n", len(events), notificationType)
 
+	// Initialize Golf Course API client once if key is provided
+	var courseClient *course.Client
+	if *golfCourseAPIKey != "" {
+		courseClient = course.NewClient(*golfCourseAPIKey)
+		fmt.Printf("Golf Course API enabled for dry run\n\n")
+	}
+
 	for i, evt := range events {
 		var msg string
 		var hasKeyboard bool
@@ -191,13 +198,6 @@ func handleDryRun(events []*event.Event) {
 			}
 			hasKeyboard = false
 		} else {
-			// Initialize Golf Course API client if key is provided
-			var courseClient *course.Client
-			if *golfCourseAPIKey != "" && i == 0 {
-				courseClient = course.NewClient(*golfCourseAPIKey)
-				fmt.Printf("Golf Course API enabled for dry run\n\n")
-			}
-
 			courseDetails := getCourseDetailsForEvent(courseClient, evt)
 			msg, _ = telegram.FormatEventWithStatusAndCourse(evt, courseDetails, "", "", "", nil)
 			fmt.Printf("--- Message %d/%d ---\n", i+1, len(events))

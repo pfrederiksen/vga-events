@@ -137,7 +137,12 @@ func (s *Snapshot) StoreRemovedEvents(removed []*Event) {
 		s.RemovedEvents = make(map[string]*Event)
 	}
 
+	now := time.Now().UTC()
 	for _, evt := range removed {
+		// Set RemovedAt timestamp if not already set
+		if evt.RemovedAt.IsZero() {
+			evt.RemovedAt = now
+		}
 		s.RemovedEvents[evt.ID] = evt
 	}
 }
@@ -152,8 +157,9 @@ func (s *Snapshot) CleanupRemovedEvents() int {
 	removed := 0
 
 	for id, evt := range s.RemovedEvents {
-		// If FirstSeen is older than 30 days ago, remove it
-		if evt.FirstSeen.Before(cutoff) {
+		// If RemovedAt is older than 30 days ago, clean it up
+		// Skip events with zero RemovedAt (shouldn't happen, but be safe)
+		if !evt.RemovedAt.IsZero() && evt.RemovedAt.Before(cutoff) {
 			delete(s.RemovedEvents, id)
 			removed++
 		}
