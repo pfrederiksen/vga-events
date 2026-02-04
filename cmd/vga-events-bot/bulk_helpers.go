@@ -10,6 +10,10 @@ import (
 	"github.com/pfrederiksen/vga-events/internal/preferences"
 )
 
+const (
+	errNoEventIDs = errNoEventIDs
+)
+
 // parseBulkEventIDs parses event IDs from command parts, supporting both
 // space-separated and comma-separated formats.
 //
@@ -80,7 +84,7 @@ func parseEventIDList(input string) []string {
 // and nil for the events list (bulk operations don't return event data).
 func handleBulkRegister(prefs preferences.Preferences, chatID string, eventIDs []string, modified *bool) (string, []*event.Event) {
 	if len(eventIDs) == 0 {
-		return "❌ No event IDs provided.", nil
+		return errNoEventIDs, nil
 	}
 
 	user := prefs.GetUser(chatID)
@@ -124,7 +128,7 @@ func handleBulkRegister(prefs preferences.Preferences, chatID string, eventIDs [
 // and nil for the events list.
 func handleBulkNote(prefs preferences.Preferences, chatID string, eventIDs []string, noteText string, modified *bool) (string, []*event.Event) {
 	if len(eventIDs) == 0 {
-		return "❌ No event IDs provided.", nil
+		return errNoEventIDs, nil
 	}
 
 	user := prefs.GetUser(chatID)
@@ -155,7 +159,7 @@ func handleBulkNote(prefs preferences.Preferences, chatID string, eventIDs []str
 // and any failed event IDs, along with nil for the events list.
 func handleBulkStatus(prefs preferences.Preferences, chatID, status string, eventIDs []string, modified *bool) (string, []*event.Event) {
 	if len(eventIDs) == 0 {
-		return "❌ No event IDs provided.", nil
+		return errNoEventIDs, nil
 	}
 
 	// Validate status first

@@ -53,8 +53,8 @@ func TestNewClient_Validation(t *testing.T) {
 				}
 				if client == nil {
 					t.Error("NewClient() returned nil client")
+					return
 				}
-				return
 				if client.botToken != tt.botToken {
 					t.Errorf("botToken = %q, want %q", client.botToken, tt.botToken)
 				}
