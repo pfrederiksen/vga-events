@@ -199,7 +199,7 @@ func TestCreateGist(t *testing.T) {
 
 				w.WriteHeader(tt.statusCode)
 				if tt.statusCode == http.StatusCreated {
-					json.NewEncoder(w).Encode(map[string]interface{}{
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
 						"id": tt.wantGistID,
 					})
 				}

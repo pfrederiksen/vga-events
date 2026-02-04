@@ -920,7 +920,7 @@ func TestFormatYardage(t *testing.T) {
 			{
 				Name:    "Championship",
 				Par:     72,
-				Yardage: 7041,  // Should be formatted as "7,041"
+				Yardage: 7041, // Should be formatted as "7,041"
 			},
 		},
 	}

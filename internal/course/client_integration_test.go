@@ -104,7 +104,7 @@ func TestSearch(t *testing.T) {
 
 				w.WriteHeader(tt.statusCode)
 				if tt.statusCode == http.StatusOK {
-					json.NewEncoder(w).Encode(tt.serverResponse)
+					_ = json.NewEncoder(w).Encode(tt.serverResponse)
 				}
 			}))
 			defer server.Close()
@@ -255,7 +255,7 @@ func TestFindBestMatch(t *testing.T) {
 			// Create test server
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(tt.serverResponse)
+				_ = json.NewEncoder(w).Encode(tt.serverResponse)
 			}))
 			defer server.Close()
 
@@ -295,7 +295,7 @@ func TestFindBestMatch_Caching(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{
+		_ = json.NewEncoder(w).Encode(SearchResult{
 			Courses: []CourseInfo{
 				{
 					ID:         123,
@@ -346,7 +346,7 @@ func TestFindBestMatch_NegativeCaching(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{
+		_ = json.NewEncoder(w).Encode(SearchResult{
 			Courses: []CourseInfo{},
 		})
 	}))

@@ -60,7 +60,7 @@ func TestFetchEvents(t *testing.T) {
 				}
 
 				w.WriteHeader(tt.statusCode)
-				w.Write([]byte(tt.htmlContent))
+				_, _ = w.Write([]byte(tt.htmlContent))
 			}))
 			defer server.Close()
 
@@ -88,14 +88,14 @@ func TestFetchEvents(t *testing.T) {
 
 func TestParseEvents_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name          string
-		html          string
+		name           string
+		html           string
 		wantEventCount int
-		checkEvent    func(*testing.T, string, string, string, string) // Check state, title, date, city
+		checkEvent     func(*testing.T, string, string, string, string) // Check state, title, date, city
 	}{
 		{
-			name: "event with date in title",
-			html: `NV - Chimera Golf Club 4.4.26 - Las Vegas`,
+			name:           "event with date in title",
+			html:           `NV - Chimera Golf Club 4.4.26 - Las Vegas`,
 			wantEventCount: 1,
 			checkEvent: func(t *testing.T, state, title, dateText, city string) {
 				if state != "NV" {
@@ -110,8 +110,8 @@ func TestParseEvents_EdgeCases(t *testing.T) {
 			},
 		},
 		{
-			name: "event without city",
-			html: `CA - Torrey Pines Golf Course`,
+			name:           "event without city",
+			html:           `CA - Torrey Pines Golf Course`,
 			wantEventCount: 1,
 			checkEvent: func(t *testing.T, state, title, dateText, city string) {
 				if state != "CA" {
@@ -123,8 +123,8 @@ func TestParseEvents_EdgeCases(t *testing.T) {
 			},
 		},
 		{
-			name: "bracketed date format",
-			html: `[Feb 13 2026] NV - Championship Event - Reno`,
+			name:           "bracketed date format",
+			html:           `[Feb 13 2026] NV - Championship Event - Reno`,
 			wantEventCount: 1,
 			checkEvent: func(t *testing.T, state, title, dateText, city string) {
 				if dateText != "Feb 13 2026" {

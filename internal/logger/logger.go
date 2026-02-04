@@ -52,11 +52,11 @@ type Fields map[string]interface{}
 
 // LogEntry represents a single log entry
 type LogEntry struct {
-	Timestamp string      `json:"timestamp"`
-	Level     string      `json:"level"`
-	Message   string      `json:"message"`
-	Fields    Fields      `json:"fields,omitempty"`
-	Error     string      `json:"error,omitempty"`
+	Timestamp string `json:"timestamp"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
+	Fields    Fields `json:"fields,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 var defaultLogger *Logger

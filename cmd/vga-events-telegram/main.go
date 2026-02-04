@@ -107,9 +107,9 @@ func readEvents(filePath string) ([]*event.Event, error) {
 	}
 
 	var result struct {
-		NewEvents     []*event.Event        `json:"new_events"`
-		RemovedEvents []*event.Event        `json:"removed_events"`
-		ChangedEvents []*event.EventChange  `json:"changed_events"`
+		NewEvents     []*event.Event       `json:"new_events"`
+		RemovedEvents []*event.Event       `json:"removed_events"`
+		ChangedEvents []*event.EventChange `json:"changed_events"`
 	}
 
 	decoder := json.NewDecoder(reader)
