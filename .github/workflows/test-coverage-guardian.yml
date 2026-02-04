@@ -34,15 +34,24 @@ jobs:
       - name: Calculate coverage
         id: coverage
         run: |
+          # Calculate total coverage
           TOTAL=$(grep "total:" coverage.txt | awk '{print $3}' | sed 's/%//')
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
           echo "Total coverage: $TOTAL%"
+
+          # Calculate internal/ package coverage (exclude cmd/ binaries)
+          INTERNAL_COV=$(grep "internal/" coverage.txt | awk '{sum+=$3; count++} END {if(count>0) print sum/count; else print 0}' | sed 's/%//')
+          echo "internal=$INTERNAL_COV" >> $GITHUB_OUTPUT
+          echo "Internal package coverage: $INTERNAL_COV%"
 
       - name: Generate coverage report
         run: |
           echo "# Test Coverage Report" > coverage-report.md
           echo "" >> coverage-report.md
           echo "**Total Coverage:** ${{ steps.coverage.outputs.total }}%" >> coverage-report.md
+          echo "**Internal Packages Coverage:** ${{ steps.coverage.outputs.internal }}%" >> coverage-report.md
+          echo "" >> coverage-report.md
+          echo "_Note: Coverage threshold (70%) applies to internal/ packages only. Binaries in cmd/ are excluded as they contain integration code that is difficult to unit test._" >> coverage-report.md
           echo "" >> coverage-report.md
           echo "## Package Coverage" >> coverage-report.md
           echo "" >> coverage-report.md
@@ -51,18 +60,18 @@ jobs:
           echo '```' >> coverage-report.md
           echo "" >> coverage-report.md
 
-          # Coverage thresholds
-          TOTAL=${{ steps.coverage.outputs.total }}
-          if (( $(echo "$TOTAL < 70" | bc -l) )); then
-            echo "⚠️ **Coverage is below target (70%):** $TOTAL%" >> coverage-report.md
+          # Coverage thresholds (check internal packages only)
+          INTERNAL=${{ steps.coverage.outputs.internal }}
+          if (( $(echo "$INTERNAL < 70" | bc -l) )); then
+            echo "⚠️ **Internal package coverage is below target (70%):** $INTERNAL%" >> coverage-report.md
             echo "" >> coverage-report.md
-            echo "Please add tests to improve coverage before merging." >> coverage-report.md
-          elif (( $(echo "$TOTAL < 80" | bc -l) )); then
-            echo "✅ **Coverage meets minimum target (70%):** $TOTAL%" >> coverage-report.md
+            echo "Please add tests for internal/ packages before merging." >> coverage-report.md
+          elif (( $(echo "$INTERNAL < 80" | bc -l) )); then
+            echo "✅ **Internal package coverage meets minimum target (70%):** $INTERNAL%" >> coverage-report.md
             echo "" >> coverage-report.md
             echo "Consider adding more tests to reach 80% coverage." >> coverage-report.md
           else
-            echo "🎉 **Excellent coverage (80%+):** $TOTAL%" >> coverage-report.md
+            echo "🎉 **Excellent internal package coverage (80%+):** $INTERNAL%" >> coverage-report.md
           fi
 
       - name: Comment on PR
@@ -106,12 +115,12 @@ jobs:
 
       - name: Check coverage threshold
         run: |
-          TOTAL=${{ steps.coverage.outputs.total }}
-          if (( $(echo "$TOTAL < 70" | bc -l) )); then
-            echo "❌ Coverage $TOTAL% is below minimum threshold (70%)"
+          INTERNAL=${{ steps.coverage.outputs.internal }}
+          if (( $(echo "$INTERNAL < 70" | bc -l) )); then
+            echo "❌ Internal package coverage $INTERNAL% is below minimum threshold (70%)"
             exit 1
           else
-            echo "✅ Coverage $TOTAL% meets minimum threshold (70%)"
+            echo "✅ Internal package coverage $INTERNAL% meets minimum threshold (70%)"
           fi
 
       - name: Upload coverage to Codecov

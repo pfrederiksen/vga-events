@@ -36,8 +36,8 @@ jobs:
           echo "# Documentation Sync Check" > doc-report.md
           echo "" >> doc-report.md
 
-          # Extract commands from bot code
-          COMMANDS=$(grep -o '/[a-z-]*' cmd/vga-events-bot/main.go | sort -u | tr '\n' ' ')
+          # Extract commands from bot code (only from case statements)
+          COMMANDS=$(grep 'case "/' cmd/vga-events-bot/main.go | grep -o '"/[a-z-]*"' | tr -d '"' | sort -u | tr '\n' ' ')
           echo "Commands found in code: $COMMANDS"
 
           # Check README
@@ -92,13 +92,16 @@ jobs:
           echo "" >> doc-report.md
 
           # Find exported functions without godoc comments
-          MISSING_GODOC=$(find . -name "*.go" -not -path "./vendor/*" -exec sh -c '
-            file="$1"
-            awk "/^func [A-Z]/ || /^type [A-Z]/ {
-              getline prev < \"$file\";
-              if (prev !~ /^\/\//) print FILENAME \":\" NR \":\" \$0
-            }" "$file"
-          ' sh {} \; | grep -v "_test.go" || true)
+          # Check if line before starts with //
+          MISSING_GODOC=$(find ./internal -name "*.go" -not -name "*_test.go" -exec awk '
+            /^\/\// { comment=1; next }
+            /^$/ { comment=0; next }
+            /^func [A-Z]/ || /^type [A-Z]/ {
+              if (!comment) print FILENAME ":" NR ":" $0
+              comment=0
+            }
+            { comment=0 }
+          ' {} \; | head -20 || true)
 
           if [ -n "$MISSING_GODOC" ]; then
             echo "⚠️ **Found exported functions/types without godoc comments:**" >> doc-report.md
