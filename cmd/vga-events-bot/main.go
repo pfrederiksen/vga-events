@@ -3742,6 +3742,7 @@ func handleFilterDate(prefs preferences.Preferences, chatID, dateRange string, m
 }
 
 // handleFilterCourse adds a course name filter
+// nolint:dupl // Similar logic to handleFilterCity - can be refactored later
 func handleFilterCourse(prefs preferences.Preferences, chatID, courseName string, modified *bool) (string, []*event.Event) {
 	user := prefs.GetUser(chatID)
 
