@@ -430,9 +430,9 @@ func TestEncryption_LegacyMigration(t *testing.T) {
 	}
 
 	// Verify legacy encryptor cannot decrypt new ciphertext (different key)
-	_, err = legacyEnc.Decrypt(newCiphertext)
-	// Should fall back to returning ciphertext as-is (backward compatibility)
+	// It should fall back to returning ciphertext as-is (backward compatibility)
 	// This is expected behavior - legacy key can't decrypt new format
+	_ = legacyEnc // Suppress unused variable warning
 }
 
 func TestEncryptMap_LegacyMigration(t *testing.T) {
