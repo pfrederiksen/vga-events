@@ -28,8 +28,12 @@ var fixedSalt = []byte("vga-events-encryption-salt-v1")
 
 // legacySalt computes the old salt format for backward compatibility
 // This allows decrypting data encrypted with the previous salt derivation method
+// Note: This function is ONLY used for migrating legacy encrypted data to the new format.
+// New encryptions use fixedSalt instead. This will be removed in a future release
+// after all users have migrated their data.
 func legacySalt(passphrase string) []byte {
-	sum := sha256.Sum256([]byte(passphrase + "vga-events-salt"))
+	// #nosec G401 - SHA256 used only for legacy migration, not for new encryptions
+	sum := sha256.Sum256([]byte(passphrase + "vga-events-salt")) // nosemgrep: go.lang.security.audit.crypto.use-of-sha1.use-of-sha1
 	return sum[:]
 }
 
