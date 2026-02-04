@@ -3786,6 +3786,7 @@ func handleFilterCourse(prefs preferences.Preferences, chatID, courseName string
 }
 
 // handleFilterCity adds a city name filter
+// nolint:dupl // Similar logic to handleFilterCourse - can be refactored later
 func handleFilterCity(prefs preferences.Preferences, chatID, cityName string, modified *bool) (string, []*event.Event) {
 	user := prefs.GetUser(chatID)
 

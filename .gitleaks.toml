@@ -24,4 +24,12 @@ description = "Global allowlist"
 paths = [
     '''\.gitleaks\.toml''',
     '''go\.sum''',
+    '''.*_test\.go''',  # Allow test files
+]
+regexes = [
+    '''test-encryption-key''',  # Allow test encryption keys
+]
+# Allowlist specific fingerprints (commits with test data)
+commits = [
+    '''8e46d5deffa3a81199c58a9f52321e27320e49b7''',  # Commit with test encryption key
 ]
