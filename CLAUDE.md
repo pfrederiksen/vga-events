@@ -410,10 +410,59 @@ As users subscribe, it will look like:
 ### Bot Commands
 
 Users send these to the bot:
-- `/subscribe NV` - Subscribe to Nevada
-- `/unsubscribe CA` - Unsubscribe from California
-- `/list` - Show subscriptions
+
+**Essential:**
+- `/start` - Start the bot
+- `/menu` - Quick actions menu
 - `/help` - Show help message
+- `/help <command>` - Detailed help for a command
+- `/subscribe <STATE>` - Subscribe to a state (e.g., `/subscribe NV`)
+- `/unsubscribe <STATE>` - Unsubscribe from a state (e.g., `/unsubscribe CA`)
+- `/unsubscribe all` - Unsubscribe from all states
+- `/manage` - Manage subscriptions with buttons
+- `/list` - Show subscriptions
+- `/check` - Check for new events now
+
+**Event Discovery:**
+- `/events` - View all events
+- `/my-events` - View tracked events
+- `/search <keyword>` - Search events
+- `/near <city>` - Find events near a city
+- `/export-calendar` - Download .ics calendar file
+
+**Event Tracking:**
+- `/note <event_id> <text>` - Add note to event
+- `/note <event_id> clear` - Remove note
+- `/notes` - List events with notes
+- Use status buttons: ⭐ Interested, ✅ Registered, 🤔 Maybe, ❌ Skip
+
+**Event Filtering:**
+- `/filter` - Show filter menu
+- `/filter date <range>` - Filter by date
+- `/filter course <name>` - Filter by course
+- `/filter city <name>` - Filter by city
+- `/filter weekends` - Weekend events only
+- `/filter save <name>` - Save filter preset
+- `/filter load <name>` - Load filter preset
+- `/filter clear` - Clear filters
+- `/filters` - List saved filters
+
+**Bulk Operations:**
+- `/bulk` - Bulk operations menu
+- `/bulk register <ids>` - Mark multiple as registered
+- `/bulk note <ids> <text>` - Add note to multiple
+- `/bulk status <status> <ids>` - Set status for multiple
+
+**Notifications:**
+- `/settings` - Configure notification mode (immediate/daily/weekly)
+- `/reminders` - Configure event reminders
+- `/notify-removals on|off` - Toggle removal notifications
+
+**Statistics & Social:**
+- `/stats` - View activity statistics
+- `/invite` - Generate invite code
+- `/join <code>` - Join using invite code
+- `/friends` - View friends list
 
 ### How Personalization Works
 
