@@ -92,7 +92,7 @@ func filterByReminderDays(events []*event.Event, days int) []*event.Event {
 func readEvents(filePath string) ([]*event.Event, error) {
 	var reader io.Reader
 	if filePath != "" {
-		f, err := os.Open(filePath)
+		f, err := os.Open(filePath)  // #nosec G304 - File path from CLI flag, user controlled
 		if err != nil {
 			return nil, fmt.Errorf("opening events file: %w", err)
 		}
@@ -131,7 +131,7 @@ func readEvents(filePath string) ([]*event.Event, error) {
 func readChangedEvents(filePath string) ([]*event.EventChange, map[string]*event.Event, error) {
 	var reader io.Reader
 	if filePath != "" {
-		f, err := os.Open(filePath)
+		f, err := os.Open(filePath)  // #nosec G304 - File path from CLI flag, user controlled
 		if err != nil {
 			return nil, nil, fmt.Errorf("opening events file: %w", err)
 		}

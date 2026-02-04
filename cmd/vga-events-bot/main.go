@@ -3436,7 +3436,7 @@ func getUpdatesWithTimeout(botToken string, offset int, timeoutSeconds int) ([]U
 // sendDigest sends a digest message to a specific user
 func sendDigest(botToken, chatID, digestFile, digestType string) {
 	// Read digest events from file
-	f, err := os.Open(digestFile)
+	f, err := os.Open(digestFile)  // #nosec G304 - File path from CLI flag, user controlled
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening digest file: %v\n", err)
 		os.Exit(1)

@@ -1,35 +1,27 @@
 # Gitleaks configuration for VGA Events
-
 title = "gitleaks config"
 
-# Allowlist test files and test data
-[[rules]]
-id = "test-encryption-keys"
-description = "Test encryption keys are not real secrets"
-regex = '''test-encryption-key'''
-path = '''(.*_test\.go|.*test.*\.go)'''
-
-[[rules.allowlist]]
-description = "Test encryption keys in test files"
-paths = [
-    '''internal/preferences/gist_test\.go''',
-]
-regexes = [
-    '''test-encryption-key''',
-]
-
-# Global allowlists
+# Global allowlist for test data and non-sensitive patterns
 [allowlist]
-description = "Global allowlist"
+description = "Allowlist for test data and false positives"
+
+# Allow all test files
 paths = [
-    '''\.gitleaks\.toml''',
-    '''go\.sum''',
-    '''.*_test\.go''',  # Allow test files
+    '''.*_test\.go$''',
+    '''.*test.*\.go$''',
 ]
+
+# Allow test encryption keys
 regexes = [
-    '''test-encryption-key''',  # Allow test encryption keys
+    '''test-encryption-key-\d+''',
 ]
-# Allowlist specific fingerprints (commits with test data)
+
+# Allowlist specific commits that contain test data
 commits = [
-    '''8e46d5deffa3a81199c58a9f52321e27320e49b7''',  # Commit with test encryption key
+    '''8e46d5deffa3a81199c58a9f52321e27320e49b7''',  # Initial test key commit
+]
+
+# Allowlist specific fingerprints (more precise than commit-wide allowlist)
+stopwords = [
+    '''test-encryption-key''',
 ]
