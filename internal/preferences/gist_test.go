@@ -58,6 +58,7 @@ func TestNewGistStorage(t *testing.T) {
 				}
 				if storage == nil {
 					t.Error("NewGistStorage() returned nil")
+					return
 				}
 				if storage.gistID != tt.gistID {
 					t.Errorf("gistID = %q, want %q", storage.gistID, tt.gistID)

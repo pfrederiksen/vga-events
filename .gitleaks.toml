@@ -1,0 +1,27 @@
+# Gitleaks configuration for VGA Events
+
+title = "gitleaks config"
+
+# Allowlist test files and test data
+[[rules]]
+id = "test-encryption-keys"
+description = "Test encryption keys are not real secrets"
+regex = '''test-encryption-key'''
+path = '''(.*_test\.go|.*test.*\.go)'''
+
+[[rules.allowlist]]
+description = "Test encryption keys in test files"
+paths = [
+    '''internal/preferences/gist_test\.go''',
+]
+regexes = [
+    '''test-encryption-key''',
+]
+
+# Global allowlists
+[allowlist]
+description = "Global allowlist"
+paths = [
+    '''\.gitleaks\.toml''',
+    '''go\.sum''',
+]

@@ -1367,6 +1367,7 @@ func TestGetUser(t *testing.T) {
 	user := prefs.GetUser("new-user")
 	if user == nil {
 		t.Error("GetUser should create new user")
+		return
 	}
 	if !user.Active {
 		t.Error("New user should be active")
