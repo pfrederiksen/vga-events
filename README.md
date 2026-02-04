@@ -2,6 +2,49 @@
 
 A simple, reliable CLI tool to check for newly-added VGA Golf state events without logging in.
 
+## 🚀 Getting Started with the Telegram Bot
+
+Get instant notifications for new VGA golf events directly in Telegram!
+
+**Start now:** [@VGAEventsBot](https://t.me/VGAEventsBot)
+
+<div align="center">
+  <img src="docs/images/telegram-notification-example.png" alt="Telegram Bot Example" width="400">
+  <p><em>Example notification with golf course details</em></p>
+</div>
+
+### Quick Setup (30 seconds)
+
+1. **Open the bot:** Click [@VGAEventsBot](https://t.me/VGAEventsBot) or search for `@VGAEventsBot` in Telegram
+2. **Start chatting:** Send `/start` to begin
+3. **Subscribe to states:**
+   ```
+   /subscribe NV
+   /subscribe CA
+   /subscribe AZ
+   ```
+4. **Done!** You'll get notified when new events are posted
+
+### Popular Commands
+
+- `/menu` - Interactive menu with buttons
+- `/my-events` - See events you're tracking (interested/registered)
+- `/search <keyword>` - Find specific events (e.g., `/search "Pebble Beach"`)
+- `/near <city>` - Find events near a location (e.g., `/near Las Vegas`)
+- `/note <event_id> <text>` - Add personal notes to events
+- `/reminders` - Set up event reminders (1, 3, 7, or 14 days before)
+- `/settings` - Configure digest mode (immediate/daily/weekly)
+- `/export-calendar` - Download events as .ics calendar file
+
+### Security & Privacy
+
+✅ **Encrypted** - Your data is protected with AES-256-GCM encryption
+✅ **Rate-limited** - 10 commands/minute to prevent spam
+✅ **Private** - Each user has separate, isolated preferences
+✅ **No login required** - Just start chatting!
+
+---
+
 ## Features
 
 ### CLI Tool
