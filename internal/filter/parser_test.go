@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// nolint:gocyclo // Test function with many test cases
 func TestParseDateRange(t *testing.T) {
 	tests := []struct {
 		name        string

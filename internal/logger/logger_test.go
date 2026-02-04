@@ -13,8 +13,8 @@ func TestLogger_Log(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmpFile.Name())   // nolint:errcheck
-	defer tmpFile.Close()              // nolint:errcheck
+	defer os.Remove(tmpFile.Name()) // nolint:errcheck
+	defer tmpFile.Close()           // nolint:errcheck
 
 	logger := New(LevelInfo, tmpFile)
 
@@ -161,8 +161,8 @@ func TestPackageLevelFunctions(t *testing.T) {
 
 func TestLogger_Levels(t *testing.T) {
 	tmpFile, _ := os.CreateTemp("", "log-test-*")
-	defer os.Remove(tmpFile.Name())   // nolint:errcheck
-	defer tmpFile.Close()              // nolint:errcheck
+	defer os.Remove(tmpFile.Name()) // nolint:errcheck
+	defer tmpFile.Close()           // nolint:errcheck
 
 	tests := []struct {
 		name      string

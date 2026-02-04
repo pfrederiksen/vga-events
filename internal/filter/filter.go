@@ -184,10 +184,8 @@ func (f *Filter) Matches(evt *event.Event) bool {
 
 	// Check max price (placeholder for future implementation)
 	// Price data would need to be added to Event struct
-	if f.MaxPrice > 0 {
-		// TODO: Implement when price data is available
-		// For now, this filter criterion is a no-op
-	}
+	// TODO: Implement when price data is available
+	_ = f.MaxPrice // Placeholder for future price filtering
 
 	return true
 }

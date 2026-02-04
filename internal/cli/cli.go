@@ -172,6 +172,7 @@ func handleShowAll(currentEvents []*event.Event, state string, format OutputForm
 }
 
 // runCheck is the main command logic
+// nolint:gocyclo // TODO: Refactor to reduce complexity
 func runCheck(cmd *cobra.Command, args []string) error {
 	// Normalize state code
 	state := strings.ToUpper(strings.TrimSpace(flagCheckState))

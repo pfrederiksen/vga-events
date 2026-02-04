@@ -77,7 +77,7 @@ type UserPreferences struct {
 
 	// Event filtering (v0.7.0)
 	SavedFilters map[string]*filter.FilterPreset `json:"saved_filters,omitempty"` // name → filter preset
-	ActiveFilter string                           `json:"active_filter,omitempty"` // name of active filter
+	ActiveFilter string                          `json:"active_filter,omitempty"` // name of active filter
 }
 
 // WeeklyStats tracks user engagement metrics for a week
@@ -125,7 +125,7 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		if user.DigestFrequency == "" {
 			user.DigestFrequency = DigestFrequencyImmediate // Keep current behavior
 		}
-		if user.DigestHour == 0 && user.DigestFrequency != "immediate" {
+		if user.DigestHour == 0 && user.DigestFrequency != DigestFrequencyImmediate {
 			user.DigestHour = 9 // 9 AM UTC default
 		}
 		if user.DigestDayOfWeek == 0 && user.DigestFrequency == "weekly" {
@@ -732,7 +732,7 @@ func (u *UserPreferences) DeleteFilter(name string) bool {
 
 // GetAllFilterNames returns all saved filter names
 func (u *UserPreferences) GetAllFilterNames() []string {
-	if u.SavedFilters == nil || len(u.SavedFilters) == 0 {
+	if len(u.SavedFilters) == 0 {
 		return []string{}
 	}
 
