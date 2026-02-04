@@ -36,6 +36,54 @@ type DiffResult struct {
 	States        map[string][]*Event // new events grouped by state
 }
 
+// MarkDuplicates identifies duplicate events across states and marks them
+// Events with the same normalized course name and date are considered duplicates
+// The first event (alphabetically by state) is kept as primary, others are marked with AlsoIn
+func MarkDuplicates(events []*Event) []*Event {
+	// Build duplication index: key -> list of events
+	dupIndex := make(map[string][]*Event)
+
+	for _, evt := range events {
+		dupKey := GenerateDuplicationKey(evt.Title, evt.DateText)
+		dupIndex[dupKey] = append(dupIndex[dupKey], evt)
+	}
+
+	// For each duplicate group, mark the duplicates
+	deduped := make([]*Event, 0)
+	seen := make(map[string]bool)
+
+	for _, evtList := range dupIndex {
+		if len(evtList) <= 1 {
+			// Not a duplicate, include as-is
+			deduped = append(deduped, evtList[0])
+			continue
+		}
+
+		// Sort by state to ensure consistent ordering
+		sort.Slice(evtList, func(i, j int) bool {
+			return evtList[i].State < evtList[j].State
+		})
+
+		// First event is the primary
+		primary := evtList[0]
+
+		// Collect other states
+		otherStates := make([]string, 0)
+		for _, evt := range evtList[1:] {
+			otherStates = append(otherStates, evt.State)
+			seen[evt.ID] = true // Mark as seen to skip later
+		}
+
+		// Mark primary with other states
+		primary.AlsoIn = otherStates
+
+		// Only include primary event
+		deduped = append(deduped, primary)
+	}
+
+	return deduped
+}
+
 // Diff compares current events against a previous snapshot and returns new and removed events
 func Diff(previous *Snapshot, current []*Event, stateFilter string) *DiffResult {
 	result := &DiffResult{
@@ -87,6 +135,18 @@ func Diff(previous *Snapshot, current []*Event, stateFilter string) *DiffResult 
 
 			result.RemovedEvents = append(result.RemovedEvents, evt)
 		}
+	}
+
+	// Mark duplicates across states before sorting
+	result.NewEvents = MarkDuplicates(result.NewEvents)
+
+	// Rebuild state groups after deduplication
+	result.States = make(map[string][]*Event)
+	for _, evt := range result.NewEvents {
+		if result.States[evt.State] == nil {
+			result.States[evt.State] = make([]*Event, 0)
+		}
+		result.States[evt.State] = append(result.States[evt.State], evt)
 	}
 
 	// Sort new events for consistent output

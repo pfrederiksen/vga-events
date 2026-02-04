@@ -32,9 +32,12 @@ Get instant notifications for new VGA golf events directly in Telegram!
 - `/search <keyword>` - Find specific events (e.g., `/search "Pebble Beach"`)
 - `/near <city>` - Find events near a location (e.g., `/near Las Vegas`)
 - `/note <event_id> <text>` - Add personal notes to events
+- `/filter` - Set up custom filters (dates, courses, weekends, etc.)
+- `/bulk` - Perform bulk operations on multiple events
 - `/reminders` - Set up event reminders (1, 3, 7, or 14 days before)
 - `/settings` - Configure digest mode (immediate/daily/weekly)
 - `/export-calendar` - Download events as .ics calendar file
+- `/help <command>` - Get detailed help for any command
 
 ### Security & Privacy
 
@@ -42,6 +45,8 @@ Get instant notifications for new VGA golf events directly in Telegram!
 ✅ **Rate-limited** - 10 commands/minute to prevent spam
 ✅ **Private** - Each user has separate, isolated preferences
 ✅ **No login required** - Just start chatting!
+✅ **Structured logging** - Sanitized logs that never expose sensitive data
+✅ **Test coverage** - 82.3% code coverage across core modules
 
 ---
 
@@ -57,8 +62,12 @@ Get instant notifications for new VGA golf events directly in Telegram!
 - JSON or text output formats
 - Exit codes for easy scripting
 
-### Telegram Bot (v0.6.0+)
-- **Security features** - Rate limiting, data encryption, input validation
+### Telegram Bot (v0.7.0+)
+- **Security features** - Rate limiting, data encryption, input validation, structured logging
+- **Advanced filtering** - Create custom filters by date, course, city, weekends-only, and save presets
+- **Event deduplication** - See when events appear in multiple states with "Also in:" display
+- **Bulk operations** - Register, add notes, or set status for multiple events at once
+- **Contextual help** - Detailed help for any command with `/help <command>`
 - **Golf course information** - Detailed course data with all tee options, par, yardage, slope, and ratings
 - **Personalized notifications** - Each user gets their own subscriptions
 - **Manual checks** - `/check` command to instantly check for new events
@@ -68,7 +77,6 @@ Get instant notifications for new VGA golf events directly in Telegram!
 - **Event reminders** - Get reminded 1 day, 3 days, 1 week, or 2 weeks before events
 - **Digest modes** - Choose immediate, daily, or weekly notifications
 - **Calendar export** - Download events as .ics files
-- **Bulk actions** - Manage multiple events at once
 - **Multi-user support** - Separate preferences for each user
 - **Social features** - Friend invitations and shared event tracking
 
@@ -192,12 +200,13 @@ Send these commands to your bot in Telegram:
 **Essential Commands:**
 - `/menu` - Quick actions menu with buttons
 - `/help` - Show help message with all commands
+- `/help <command>` - Get detailed help for a specific command (e.g., `/help filter`)
 - `/subscribe <STATE>` - Subscribe to a state's events (e.g., `/subscribe NV`)
 - `/unsubscribe <STATE>` - Unsubscribe from a state (e.g., `/unsubscribe CA`)
 - `/unsubscribe all` - Unsubscribe from all states with confirmation
 - `/manage` - Manage your subscriptions with buttons
 - `/list` - Show your current subscriptions
-- `/check` - Manually check for new events right now (v0.5.2)
+- `/check` - Manually check for new events right now
 
 **Event Discovery:**
 - `/search <keyword>` - Search for events (e.g., `/search "Pine Valley"`)
@@ -218,6 +227,27 @@ Events automatically include detailed course data when available:
 - `/note <event_id> <text>` - Add a personal note to an event
 - `/note <event_id> clear` - Remove a note from an event
 - `/notes` - List all events with notes
+
+**Event Filtering:**
+- `/filter` - Show current filter status or interactive filter menu
+- `/filter date <range>` - Filter by date (e.g., `Mar 1-15`, `March`, `Apr 1 - May 15`)
+- `/filter course <name>` - Filter by course name (e.g., `Pebble Beach`)
+- `/filter city <name>` - Filter by city
+- `/filter weekends` - Show only weekend events
+- `/filter state <STATE>` - Filter by specific state(s) within subscriptions
+- `/filter save <name>` - Save current filter as a preset
+- `/filter load <name>` - Load a saved filter preset
+- `/filter clear` - Clear all active filters
+- `/filters` - List all saved filter presets
+
+**Event Deduplication:**
+Events that appear in multiple states are automatically deduplicated with "Also in:" notation showing all states where the event is listed.
+
+**Bulk Operations:**
+- `/bulk` - Show bulk operations menu with interactive buttons
+- `/bulk register <id1> <id2> ...` - Mark multiple events as registered
+- `/bulk note <id1,id2> <text>` - Add same note to multiple events
+- `/bulk status <status> <id1> <id2>` - Set status for multiple events
 
 **Event Tracking:**
 When you receive event notifications, use the status buttons to track them:
@@ -315,6 +345,11 @@ The bot includes multiple security layers:
 - Local snapshots use 0600 permissions (owner-only access)
 - GitHub Gist preferences stored privately
 - No sensitive data in error messages
+
+**Structured Logging:**
+- JSON-formatted logs for easy parsing and analysis
+- Sanitized error messages that never expose sensitive data
+- Operation metrics tracking (counters, gauges, timings)
 
 ### How It Works
 

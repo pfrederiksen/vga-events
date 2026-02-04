@@ -20,13 +20,14 @@ const (
 
 // OutputResult contains data to be output
 type OutputResult struct {
-	CheckedAt     time.Time                 `json:"checked_at"`
-	States        []string                  `json:"states"`
-	NewEvents     []*event.Event            `json:"new_events"`
-	RemovedEvents []*event.Event            `json:"removed_events,omitempty"`
-	EventCount    int                       `json:"event_count"`
-	ByState       map[string][]*event.Event `json:"by_state,omitempty"`
-	ShowAll       bool                      `json:"show_all,omitempty"`
+	CheckedAt      time.Time                 `json:"checked_at"`
+	States         []string                  `json:"states"`
+	NewEvents      []*event.Event            `json:"new_events"`
+	RemovedEvents  []*event.Event            `json:"removed_events,omitempty"`
+	ChangedEvents  []*event.EventChange      `json:"changed_events,omitempty"`
+	EventCount     int                       `json:"event_count"`
+	ByState        map[string][]*event.Event `json:"by_state,omitempty"`
+	ShowAll        bool                      `json:"show_all,omitempty"`
 }
 
 // WriteOutput writes the result in the specified format
@@ -92,6 +93,9 @@ func writeText(w io.Writer, result *OutputResult, verbose bool) error {
 				if evt.DateText != "" {
 					fmt.Fprintf(w, "       Date: %s\n", evt.DateText)
 				}
+				if len(evt.AlsoIn) > 0 {
+					fmt.Fprintf(w, "       Also in: %s\n", formatStateList(evt.AlsoIn))
+				}
 				if verbose {
 					fmt.Fprintf(w, "       ID: %s\n", evt.ID)
 					if evt.City != "" {
@@ -112,6 +116,9 @@ func writeText(w io.Writer, result *OutputResult, verbose bool) error {
 			if evt.DateText != "" {
 				fmt.Fprintf(w, "     Date: %s\n", evt.DateText)
 			}
+			if len(evt.AlsoIn) > 0 {
+				fmt.Fprintf(w, "     Also in: %s\n", formatStateList(evt.AlsoIn))
+			}
 			if verbose {
 				fmt.Fprintf(w, "     ID: %s\n", evt.ID)
 				if evt.City != "" {
@@ -123,4 +130,28 @@ func writeText(w io.Writer, result *OutputResult, verbose bool) error {
 	}
 
 	return nil
+}
+
+// formatStateList formats a list of state codes
+func formatStateList(states []string) string {
+	if len(states) == 0 {
+		return ""
+	}
+	if len(states) == 1 {
+		return states[0]
+	}
+	// Sort for consistent output
+	sorted := make([]string, len(states))
+	copy(sorted, states)
+	sort.Strings(sorted)
+
+	// Join with commas
+	result := ""
+	for i, state := range sorted {
+		if i > 0 {
+			result += ", "
+		}
+		result += state
+	}
+	return result
 }

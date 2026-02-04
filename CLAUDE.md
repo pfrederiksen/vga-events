@@ -46,6 +46,14 @@ The `main` branch is protected. All changes must go through pull requests.
 - Use `testdata/fixtures/` for test HTML fixtures
 - Run tests: `go test -v ./...`
 - Check coverage: `go test -cover ./...`
+- **Current test coverage: 82.3%** across core modules
+  - internal/calendar: 98.8%
+  - internal/course: 96.0%
+  - internal/event: 89.0%
+  - internal/logger: 89.2%
+  - internal/crypto: 86.4%
+  - internal/filter: 85.6%
+  - internal/scraper: 85.6%
 
 ## Code Style
 
@@ -59,6 +67,88 @@ The `main` branch is protected. All changes must go through pull requests.
 - Use `--verbose` flag to see debug output
 - Check `~/.local/share/vga-events/` for snapshot files
 - Use `--refresh` to reset state for testing
+
+### Structured Logging
+
+The bot uses the `internal/logger` package for structured JSON logging:
+
+```go
+import "github.com/pfrederiksen/vga-events/internal/logger"
+
+// Log messages with structured fields
+logger.Info("Processing command", logger.Fields{
+    "command": "/subscribe",
+    "user_id": chatID,
+})
+
+logger.Error("Failed to fetch events", logger.Fields{
+    "state": "NV",
+    "retry_count": 3,
+}, err)
+
+// Track metrics
+logger.IncrCounter("commands.subscribe")
+logger.SetGauge("active_users", 42.0)
+logger.RecordTiming("api.fetch", duration)
+
+// Get metrics snapshot
+snapshot := logger.GetMetricsSnapshot()
+```
+
+### Event Filtering System
+
+The filtering system allows users to create complex event filters:
+
+**Filter Structure:**
+- Date ranges (from/to)
+- Course names (substring match, case-insensitive)
+- Cities (substring match, case-insensitive)
+- States (within user subscriptions)
+- Weekends-only flag
+- Maximum price (placeholder for future use)
+
+**Filter Presets:**
+Users can save filters with names and load them later:
+```go
+import "github.com/pfrederiksen/vga-events/internal/filter"
+
+// Create a filter
+f := filter.NewFilter()
+f.WeekendsOnly = true
+f.Courses = []string{"Pebble Beach"}
+
+// Save as preset
+preset := filter.NewFilterPreset("weekend-pebble", f)
+user.Filters["weekend-pebble"] = preset
+
+// Apply filter to events
+filtered := f.Apply(events)
+```
+
+**Date Range Parsing:**
+The `internal/filter/parser.go` supports multiple date formats:
+- `Mar 1-15` - Same month range
+- `March 1 - April 15` - Cross-month range
+- `March` - Entire month
+- Automatically handles year inference (current or next year)
+
+### Bulk Operations
+
+Bulk operation helpers in `cmd/vga-events-bot/bulk_helpers.go`:
+
+```go
+// Parse event IDs from user input (space or comma-separated)
+eventIDs := parseBulkEventIDs(parts)
+
+// Mark multiple events as registered
+handleBulkRegister(prefs, chatID, eventIDs, &modified)
+
+// Add same note to multiple events
+handleBulkNote(prefs, chatID, eventIDs, "Great course!", &modified)
+
+// Set status for multiple events
+handleBulkStatus(prefs, chatID, "interested", eventIDs, &modified)
+```
 
 ## Telegram Bot (Interactive + Multi-User)
 
@@ -92,13 +182,16 @@ The project includes an interactive Telegram bot with personalized notifications
 1. **internal/telegram** - Telegram API client (send messages)
 2. **internal/preferences** - User preference management + Gist storage with encryption
 3. **internal/crypto** - AES-256-GCM encryption for sensitive data
-4. **cmd/vga-events-bot** - Command processor (handles /subscribe, etc.) with rate limiting
-5. **cmd/vga-events-telegram** - Notification sender
-6. **.github/workflows/telegram-bot-commands.yml** - Command processing
-7. **.github/workflows/telegram-bot.yml** - Personalized notifications
-8. **.github/workflows/telegram-daily-digest.yml** - Daily digest delivery
-9. **.github/workflows/telegram-weekly-digest.yml** - Weekly digest delivery
-10. **.github/workflows/telegram-reminders.yml** - Event reminder delivery
+4. **internal/filter** - Event filtering system with preset support
+5. **internal/logger** - Structured JSON logging and metrics tracking
+6. **cmd/vga-events-bot** - Command processor (handles /subscribe, /filter, /bulk, etc.) with rate limiting
+7. **cmd/vga-events-bot/bulk_helpers.go** - Bulk operation utilities
+8. **cmd/vga-events-telegram** - Notification sender
+9. **.github/workflows/telegram-bot-commands.yml** - Command processing
+10. **.github/workflows/telegram-bot.yml** - Personalized notifications
+11. **.github/workflows/telegram-daily-digest.yml** - Daily digest delivery
+12. **.github/workflows/telegram-weekly-digest.yml** - Weekly digest delivery
+13. **.github/workflows/telegram-reminders.yml** - Event reminder delivery
 
 ### Security Features
 
@@ -123,9 +216,61 @@ The project includes an interactive Telegram bot with personalized notifications
 - Sanitized error messages (no sensitive API responses exposed)
 - Proper error wrapping for debugging
 
-### Current Version: v0.6.0
+### Current Version: v0.7.0
 
-**v0.6.0 (Latest):**
+**v0.7.0 (Latest):**
+- **Advanced Event Filtering** - Create custom filters for precise event discovery
+  - Filter by date ranges (e.g., "Mar 1-15", "March", "Apr 1 - May 15")
+  - Filter by course names (substring match, case-insensitive)
+  - Filter by cities (substring match, case-insensitive)
+  - Filter by states (within your subscriptions)
+  - Weekends-only filtering (Saturday/Sunday events)
+  - Save and load filter presets with names
+  - Commands: `/filter`, `/filter date/course/city/state/weekends`, `/filter save/load/clear`, `/filters`
+- **Event Deduplication** - Events appearing in multiple states show "Also in:" notation
+  - Reduces notification spam for cross-state events
+  - Appears in notifications, `/events`, `/my-events`, and CLI output
+  - Uses normalized title matching to detect duplicates
+- **Bulk Operations** - Manage multiple events at once
+  - `/bulk register <id1> <id2>` - Mark multiple events as registered
+  - `/bulk note <ids> <text>` - Add same note to multiple events
+  - `/bulk status <status> <ids>` - Set status for multiple events at once
+  - Interactive keyboard menu for easier bulk actions
+  - Supports space-separated and comma-separated event IDs
+- **Enhanced Help System** - Contextual help for every command
+  - `/help <command>` - Get detailed help with examples for any command
+  - Shows description, usage, examples, and related commands
+  - Comprehensive documentation for all 40+ bot commands
+- **Structured Logging and Metrics** - Production-ready observability
+  - JSON-formatted structured logging with levels (DEBUG, INFO, WARN, ERROR)
+  - Operation metrics tracking (counters, gauges, timings)
+  - Sanitized error messages that never expose sensitive data
+  - New package: `internal/logger` with `Logger` and `Metrics` types
+- **Improved Test Coverage** - 82.3% overall test coverage
+  - New tests for filter parsing, bulk operations, and logging
+  - Integration tests for filtering system
+  - 98.8% coverage in calendar package
+  - 96.0% coverage in course package
+
+**New Packages and Files (v0.7.0):**
+- `internal/filter/filter.go` - Filter types and matching logic
+- `internal/filter/parser.go` - Date range parsing utilities
+- `internal/filter/filter_test.go` - Filter unit tests
+- `internal/filter/parser_test.go` - Parser unit tests
+- `internal/filter/integration_test.go` - End-to-end filter tests
+- `internal/logger/logger.go` - Structured logging and metrics
+- `internal/logger/logger_test.go` - Logger tests
+- `cmd/vga-events-bot/bulk_helpers.go` - Bulk operation utilities
+- `cmd/vga-events-bot/bulk_helpers_test.go` - Bulk operation tests
+
+**Data Model Changes (v0.7.0):**
+- `UserPreferences.Filters` - Map of filter preset name → FilterPreset
+- `UserPreferences.ActiveFilter` - Currently active filter (nil if none)
+- `Event.AlsoIn` - Array of additional state codes where event appears
+- `Filter` struct - Filtering criteria (dates, courses, cities, states, weekends, price)
+- `FilterPreset` struct - Named filter with creation/update timestamps
+
+**v0.6.0:**
 - **Event Removal Notifications** - Get notified when events are removed or cancelled from the VGA website
   - High-priority notifications (⚠️) for events you're registered for or tracking
   - Low-priority notifications (ℹ️) for events in your subscribed states

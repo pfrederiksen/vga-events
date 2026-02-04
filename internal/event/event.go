@@ -19,6 +19,7 @@ type Event struct {
 	SourceURL string    `json:"source_url"`
 	FirstSeen time.Time `json:"first_seen"`
 	RemovedAt time.Time `json:"removed_at,omitempty"` // When event was removed from VGA website
+	AlsoIn    []string  `json:"also_in,omitempty"`    // Other states where this event appears (for duplicates)
 }
 
 // GenerateID creates a deterministic ID for an event based on stable fields
@@ -53,5 +54,39 @@ func NewEvent(state, title, dateText, city, raw, sourceURL string) *Event {
 		Raw:       raw,
 		SourceURL: sourceURL,
 		FirstSeen: time.Now().UTC(),
+		AlsoIn:    []string{}, // Initialize empty slice
 	}
+}
+
+// NormalizeCourseTitle normalizes a course title for deduplication
+// Removes common variations and standardizes formatting
+func NormalizeCourseTitle(title string) string {
+	// Convert to lowercase and trim
+	normalized := strings.ToLower(strings.TrimSpace(title))
+
+	// Remove extra whitespace first
+	normalized = strings.Join(strings.Fields(normalized), " ")
+
+	// Remove common suffixes and prefixes
+	replacements := map[string]string{
+		" golf club":    "",
+		" golf course":  "",
+		" country club": "",
+		" cc":           "",
+		" gc":           "",
+		"the ":          "",
+	}
+
+	for old, new := range replacements {
+		normalized = strings.ReplaceAll(normalized, old, new)
+	}
+
+	return normalized
+}
+
+// GenerateDuplicationKey creates a key for detecting duplicate events across states
+// Based on normalized course name and date
+func GenerateDuplicationKey(title, dateText string) string {
+	normalized := NormalizeCourseTitle(title)
+	return fmt.Sprintf("%s|%s", normalized, dateText)
 }

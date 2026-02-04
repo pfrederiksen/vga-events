@@ -1072,6 +1072,338 @@ func TestGetFriendsForEvent_PrivacyControls(t *testing.T) {
 	}
 }
 
+func TestNotifyOnChanges(t *testing.T) {
+	prefs := NewPreferences()
+	user := prefs.GetUser("12345")
+
+	// Default should be true
+	if !user.NotifyOnChanges {
+		t.Error("Default NotifyOnChanges should be true")
+	}
+
+	// Test setting to false
+	user.NotifyOnChanges = false
+	if user.NotifyOnChanges {
+		t.Error("NotifyOnChanges should be false")
+	}
+
+	// Test setting to true
+	user.NotifyOnChanges = true
+	if !user.NotifyOnChanges {
+		t.Error("NotifyOnChanges should be true")
+	}
+}
+
+func TestNotifyOnRemoval(t *testing.T) {
+	prefs := NewPreferences()
+	user := prefs.GetUser("12345")
+
+	// Default should be true
+	if !user.NotifyOnRemoval {
+		t.Error("Default NotifyOnRemoval should be true")
+	}
+
+	// Test setting to false
+	user.NotifyOnRemoval = false
+	if user.NotifyOnRemoval {
+		t.Error("NotifyOnRemoval should be false")
+	}
+
+	// Test setting to true
+	user.NotifyOnRemoval = true
+	if !user.NotifyOnRemoval {
+		t.Error("NotifyOnRemoval should be true")
+	}
+}
+
+func TestHidePastEvents(t *testing.T) {
+	prefs := NewPreferences()
+	user := prefs.GetUser("12345")
+
+	// Default should be true
+	if !user.HidePastEvents {
+		t.Error("Default HidePastEvents should be true")
+	}
+
+	// Test setting to false
+	user.HidePastEvents = false
+	if user.HidePastEvents {
+		t.Error("HidePastEvents should be false")
+	}
+
+	// Test setting to true
+	user.HidePastEvents = true
+	if !user.HidePastEvents {
+		t.Error("HidePastEvents should be true")
+	}
+}
+
+func TestDaysAhead(t *testing.T) {
+	prefs := NewPreferences()
+	user := prefs.GetUser("12345")
+
+	// Default should be 0
+	if user.DaysAhead != 0 {
+		t.Errorf("Default DaysAhead = %d, want 0", user.DaysAhead)
+	}
+
+	// Test setting valid values
+	user.DaysAhead = 30
+	if user.DaysAhead != 30 {
+		t.Errorf("DaysAhead = %d, want 30", user.DaysAhead)
+	}
+
+	user.DaysAhead = 90
+	if user.DaysAhead != 90 {
+		t.Errorf("DaysAhead = %d, want 90", user.DaysAhead)
+	}
+}
+
+func TestDigestHour(t *testing.T) {
+	prefs := NewPreferences()
+	user := prefs.GetUser("12345")
+
+	// Default should be 9
+	if user.DigestHour != 9 {
+		t.Errorf("Default DigestHour = %d, want 9", user.DigestHour)
+	}
+
+	// Test setting values
+	user.DigestHour = 12
+	if user.DigestHour != 12 {
+		t.Errorf("DigestHour = %d, want 12", user.DigestHour)
+	}
+}
+
+func TestDigestDayOfWeek(t *testing.T) {
+	prefs := NewPreferences()
+	user := prefs.GetUser("12345")
+
+	// Default should be 1 (Monday)
+	if user.DigestDayOfWeek != 1 {
+		t.Errorf("Default DigestDayOfWeek = %d, want 1", user.DigestDayOfWeek)
+	}
+
+	// Test setting values
+	user.DigestDayOfWeek = 5
+	if user.DigestDayOfWeek != 5 {
+		t.Errorf("DigestDayOfWeek = %d, want 5", user.DigestDayOfWeek)
+	}
+}
+
+func TestShareEvents(t *testing.T) {
+	prefs := NewPreferences()
+	user := prefs.GetUser("12345")
+
+	// Default should be false
+	if user.ShareEvents {
+		t.Error("Default ShareEvents should be false")
+	}
+
+	// Test toggling
+	user.ShareEvents = true
+	if !user.ShareEvents {
+		t.Error("ShareEvents should be true")
+	}
+
+	user.ShareEvents = false
+	if user.ShareEvents {
+		t.Error("ShareEvents should be false")
+	}
+}
+
+func TestRemoveAllStates(t *testing.T) {
+	prefs := NewPreferences()
+	chatID := "12345"
+
+	// Add some states using the Preferences methods
+	prefs.AddState(chatID, "NV")
+	prefs.AddState(chatID, "CA")
+	prefs.AddState(chatID, "TX")
+
+	user := prefs.GetUser(chatID)
+	if len(user.States) != 3 {
+		t.Errorf("Before remove, States length = %d, want 3", len(user.States))
+	}
+
+	// Remove all states one by one
+	prefs.RemoveState(chatID, "NV")
+	prefs.RemoveState(chatID, "CA")
+	prefs.RemoveState(chatID, "TX")
+
+	// Verify all states removed
+	if len(user.States) != 0 {
+		t.Errorf("After removing all, States length = %d, want 0", len(user.States))
+	}
+}
+
+func TestMultipleUsersWithFrequency(t *testing.T) {
+	prefs := NewPreferences()
+
+	// Create users with different frequencies
+	prefs.AddState("user1", "NV")
+	user1 := prefs.GetUser("user1")
+	user1.SetDigestFrequency("daily")
+
+	prefs.AddState("user2", "CA")
+	user2 := prefs.GetUser("user2")
+	user2.SetDigestFrequency("daily")
+
+	prefs.AddState("user3", "TX")
+	user3 := prefs.GetUser("user3")
+	user3.SetDigestFrequency("weekly")
+
+	prefs.AddState("user4", "AZ")
+	user4 := prefs.GetUser("user4")
+	user4.SetDigestFrequency("immediate")
+
+	// Inactive user
+	prefs.AddState("user5", "FL")
+	user5 := prefs.GetUser("user5")
+	user5.SetDigestFrequency("daily")
+	user5.Active = false
+
+	// Count users by frequency
+	dailyCount := 0
+	weeklyCount := 0
+	immediateCount := 0
+
+	for _, user := range prefs.GetAllUsers() {
+		userPrefs := prefs.GetUser(user)
+		switch userPrefs.DigestFrequency {
+		case "daily":
+			dailyCount++
+		case "weekly":
+			weeklyCount++
+		case "immediate":
+			immediateCount++
+		}
+	}
+
+	// Verify counts (user5 is inactive so not in GetAllUsers)
+	if dailyCount != 2 {
+		t.Errorf("Daily users = %d, want 2", dailyCount)
+	}
+	if weeklyCount != 1 {
+		t.Errorf("Weekly users = %d, want 1", weeklyCount)
+	}
+	if immediateCount != 1 {
+		t.Errorf("Immediate users = %d, want 1", immediateCount)
+	}
+}
+
+func TestAddState(t *testing.T) {
+	prefs := NewPreferences()
+
+	// Test adding new state
+	if !prefs.AddState("12345", "NV") {
+		t.Error("AddState should return true for new state")
+	}
+
+	// Test duplicate state
+	if prefs.AddState("12345", "NV") {
+		t.Error("AddState should return false for duplicate state")
+	}
+
+	// Verify state was added
+	if !prefs.HasState("12345", "NV") {
+		t.Error("State should be in user's list")
+	}
+}
+
+func TestRemoveState(t *testing.T) {
+	prefs := NewPreferences()
+	prefs.AddState("12345", "NV")
+	prefs.AddState("12345", "CA")
+
+	// Test removing existing state
+	if !prefs.RemoveState("12345", "NV") {
+		t.Error("RemoveState should return true for existing state")
+	}
+
+	// Test removing non-existent state
+	if prefs.RemoveState("12345", "TX") {
+		t.Error("RemoveState should return false for non-existent state")
+	}
+
+	// Verify state was removed
+	if prefs.HasState("12345", "NV") {
+		t.Error("State should be removed")
+	}
+
+	// Verify other state still exists
+	if !prefs.HasState("12345", "CA") {
+		t.Error("Other state should still exist")
+	}
+}
+
+func TestGetStates(t *testing.T) {
+	prefs := NewPreferences()
+	prefs.AddState("12345", "NV")
+	prefs.AddState("12345", "CA")
+	prefs.AddState("12345", "TX")
+
+	states := prefs.GetStates("12345")
+
+	if len(states) != 3 {
+		t.Errorf("GetStates returned %d states, want 3", len(states))
+	}
+
+	// Check all states are present
+	stateMap := make(map[string]bool)
+	for _, s := range states {
+		stateMap[s] = true
+	}
+
+	if !stateMap["NV"] || !stateMap["CA"] || !stateMap["TX"] {
+		t.Error("Not all states returned")
+	}
+}
+
+func TestGetUser(t *testing.T) {
+	prefs := NewPreferences()
+
+	// Test getting new user
+	user := prefs.GetUser("new-user")
+	if user == nil {
+		t.Error("GetUser should create new user")
+	}
+	if !user.Active {
+		t.Error("New user should be active")
+	}
+
+	// Test getting existing user
+	user.States = []string{"NV"}
+	user2 := prefs.GetUser("new-user")
+	if len(user2.States) != 1 {
+		t.Error("GetUser should return same user instance")
+	}
+}
+
+func TestValidState(t *testing.T) {
+	tests := []struct {
+		state string
+		valid bool
+	}{
+		{"NV", true},
+		{"CA", true},
+		{"TX", true},
+		{"ALL", true},
+		{"ZZ", false},
+		{"", false},
+		{"  ", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			got := IsValidState(tt.state)
+			if got != tt.valid {
+				t.Errorf("IsValidState(%q) = %v, want %v", tt.state, got, tt.valid)
+			}
+		})
+	}
+}
+
 func TestFriendMigration(t *testing.T) {
 	prefs := NewPreferences()
 	chatID := "12345"
