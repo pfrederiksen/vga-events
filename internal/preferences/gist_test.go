@@ -234,7 +234,7 @@ func TestGistStorage_EncryptionIntegration(t *testing.T) {
 	user.SetEventStatus("evt2", "interested")
 	user.InviteCode = "secret-invite"
 
-	encryptionKey := "test-encryption-key-12345"
+	encryptionKey := "test-encryption-key-12345" // gitleaks:allow - test key only
 
 	// Create storage with encryption
 	storage, err := NewGistStorageWithEncryption("gist123", "token123", encryptionKey)
