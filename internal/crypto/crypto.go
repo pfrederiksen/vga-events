@@ -18,6 +18,14 @@ const (
 	keySize    = 32 // AES-256
 )
 
+// fixedSalt is a static salt for PBKDF2 key derivation
+// Note: Using a fixed salt is acceptable for this use case because:
+// 1. We're deriving encryption keys, not storing password hashes
+// 2. PBKDF2 with 100k iterations provides sufficient computational cost
+// 3. The encryption key protects user data, not authenticate users
+// 4. Storing per-value salts would require schema changes and is unnecessary here
+var fixedSalt = []byte("vga-events-encryption-salt-v1")
+
 // Encryptor handles encryption and decryption of sensitive data
 type Encryptor struct {
 	key []byte
@@ -29,12 +37,10 @@ func NewEncryptor(passphrase string) *Encryptor {
 		return nil
 	}
 
-	// Derive key from passphrase using PBKDF2
-	// Note: In production, salt should be stored alongside encrypted data
-	// For this use case, we use a fixed salt derived from the passphrase itself
-	salt := sha256.Sum256([]byte(passphrase + "vga-events-salt"))
-
-	key := pbkdf2.Key([]byte(passphrase), salt[:], iterations, keySize, sha256.New)
+	// Derive key from passphrase using PBKDF2 with fixed salt
+	// Using PBKDF2 with 100,000 iterations provides strong key derivation
+	// even with a fixed salt, which is acceptable for encrypting stored data
+	key := pbkdf2.Key([]byte(passphrase), fixedSalt, iterations, keySize, sha256.New)
 
 	return &Encryptor{key: key}
 }
