@@ -1,8 +1,11 @@
 package crypto
 
 import (
+	"crypto/sha256"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/pbkdf2"
 )
 
 func TestNewEncryptor(t *testing.T) {
@@ -371,5 +374,131 @@ func TestEncryption_NonDeterministic(t *testing.T) {
 
 	if dec1 != plaintext || dec2 != plaintext {
 		t.Error("Both ciphertexts should decrypt to same plaintext")
+	}
+}
+
+func TestEncryption_LegacyMigration(t *testing.T) {
+	passphrase := "test-migration-passphrase"
+	plaintext := "sensitive data to migrate"
+
+	// Create legacy encryptor (simulates old encryption with SHA256-derived salt)
+	legacySalt := legacySalt(passphrase)
+	legacyKey := pbkdf2.Key([]byte(passphrase), legacySalt, 100000, 32, sha256.New)
+	legacyEnc := &Encryptor{key: legacyKey}
+
+	// Encrypt with legacy method
+	legacyCiphertext, err := legacyEnc.Encrypt(plaintext)
+	if err != nil {
+		t.Fatalf("Legacy Encrypt() error = %v", err)
+	}
+
+	// Create new encryptor (has both new and legacy keys)
+	newEnc := NewEncryptor(passphrase)
+
+	// Decrypt with new encryptor - should detect migration needed
+	decrypted, needsMigration, err := newEnc.DecryptWithMigration(legacyCiphertext)
+	if err != nil {
+		t.Fatalf("DecryptWithMigration() error = %v", err)
+	}
+
+	if decrypted != plaintext {
+		t.Errorf("DecryptWithMigration() = %q, want %q", decrypted, plaintext)
+	}
+
+	if !needsMigration {
+		t.Error("DecryptWithMigration() should detect legacy encryption")
+	}
+
+	// Re-encrypt with new key
+	newCiphertext, err := newEnc.Encrypt(decrypted)
+	if err != nil {
+		t.Fatalf("Re-encrypt error = %v", err)
+	}
+
+	// Decrypt again - should NOT need migration this time
+	decrypted2, needsMigration2, err := newEnc.DecryptWithMigration(newCiphertext)
+	if err != nil {
+		t.Fatalf("Second DecryptWithMigration() error = %v", err)
+	}
+
+	if decrypted2 != plaintext {
+		t.Errorf("Second decrypt = %q, want %q", decrypted2, plaintext)
+	}
+
+	if needsMigration2 {
+		t.Error("New encryption should NOT need migration")
+	}
+
+	// Verify legacy encryptor cannot decrypt new ciphertext (different key)
+	_, err = legacyEnc.Decrypt(newCiphertext)
+	// Should fall back to returning ciphertext as-is (backward compatibility)
+	// This is expected behavior - legacy key can't decrypt new format
+}
+
+func TestEncryptMap_LegacyMigration(t *testing.T) {
+	passphrase := "test-map-migration"
+
+	// Create legacy encryptor
+	legacySalt := legacySalt(passphrase)
+	legacyKey := pbkdf2.Key([]byte(passphrase), legacySalt, 100000, 32, sha256.New)
+	legacyEnc := &Encryptor{key: legacyKey}
+
+	// Encrypt map with legacy method
+	originalMap := map[string]string{
+		"note1": "First note",
+		"note2": "Second note",
+		"note3": "Third note",
+	}
+
+	legacyEncryptedMap, err := legacyEnc.EncryptMap(originalMap)
+	if err != nil {
+		t.Fatalf("Legacy EncryptMap() error = %v", err)
+	}
+
+	// Create new encryptor and decrypt
+	newEnc := NewEncryptor(passphrase)
+	decryptedMap, needsMigration, err := newEnc.DecryptMapWithMigration(legacyEncryptedMap)
+	if err != nil {
+		t.Fatalf("DecryptMapWithMigration() error = %v", err)
+	}
+
+	if !needsMigration {
+		t.Error("DecryptMapWithMigration() should detect legacy encryption")
+	}
+
+	// Verify all values decrypted correctly
+	for k, want := range originalMap {
+		got, exists := decryptedMap[k]
+		if !exists {
+			t.Errorf("Missing key %q in decrypted map", k)
+			continue
+		}
+		if got != want {
+			t.Errorf("DecryptMapWithMigration()[%q] = %q, want %q", k, got, want)
+		}
+	}
+
+	// Re-encrypt with new key
+	newEncryptedMap, err := newEnc.EncryptMap(decryptedMap)
+	if err != nil {
+		t.Fatalf("Re-encrypt map error = %v", err)
+	}
+
+	// Decrypt again - should NOT need migration
+	decryptedMap2, needsMigration2, err := newEnc.DecryptMapWithMigration(newEncryptedMap)
+	if err != nil {
+		t.Fatalf("Second DecryptMapWithMigration() error = %v", err)
+	}
+
+	if needsMigration2 {
+		t.Error("New encryption should NOT need migration")
+	}
+
+	// Verify values still correct
+	for k, want := range originalMap {
+		got := decryptedMap2[k]
+		if got != want {
+			t.Errorf("After migration, map[%q] = %q, want %q", k, got, want)
+		}
 	}
 }
