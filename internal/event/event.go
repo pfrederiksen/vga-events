@@ -1,7 +1,7 @@
 package event
 
 import (
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 - SHA1 used for non-cryptographic event ID generation, not security
 	"fmt"
 	"strings"
 	"time"
@@ -24,7 +24,7 @@ type Event struct {
 
 // GenerateID creates a deterministic ID for an event based on stable fields
 func GenerateID(state, raw string) string {
-	h := sha1.New()
+	h := sha1.New() // #nosec G401 - SHA1 used for non-cryptographic ID generation
 	h.Write([]byte(state + "|" + raw))
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
@@ -37,7 +37,7 @@ func GenerateStableKey(state, title string) string {
 	// Remove common date-related words that might appear in titles
 	// (In future, could add more sophisticated normalization)
 
-	h := sha1.New()
+	h := sha1.New() // #nosec G401 - SHA1 used for non-cryptographic ID generation
 	h.Write([]byte(state + "|" + normalized))
 	return fmt.Sprintf("%x", h.Sum(nil))
 }

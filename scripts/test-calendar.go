@@ -24,9 +24,9 @@ func main() {
 	// Generate .ics file
 	icsContent := calendar.GenerateICS(evt)
 
-	// Write to file
+	// Write to file (owner read/write only for security)
 	filename := "test-vga-event.ics"
-	if err := os.WriteFile(filename, []byte(icsContent), 0644); err != nil {
+	if err := os.WriteFile(filename, []byte(icsContent), 0600); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing file: %v\n", err)
 		os.Exit(1)
 	}
