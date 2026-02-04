@@ -1,0 +1,27 @@
+# Gitleaks configuration for VGA Events
+title = "gitleaks config"
+
+# Global allowlist for test data and non-sensitive patterns
+[allowlist]
+description = "Allowlist for test data and false positives"
+
+# Allow all test files
+paths = [
+    '''.*_test\.go$''',
+    '''.*test.*\.go$''',
+]
+
+# Allow test encryption keys
+regexes = [
+    '''test-encryption-key-\d+''',
+]
+
+# Allowlist specific commits that contain test data
+commits = [
+    '''8e46d5deffa3a81199c58a9f52321e27320e49b7''',  # Initial test key commit
+]
+
+# Allowlist specific fingerprints (more precise than commit-wide allowlist)
+stopwords = [
+    '''test-encryption-key''',
+]

@@ -451,3 +451,332 @@ func TestSnapshotRemovedEventsStorage(t *testing.T) {
 		}
 	})
 }
+
+func TestMarkDuplicates(t *testing.T) {
+	t.Run("detects duplicates across states", func(t *testing.T) {
+		// Create same event in three states
+		evt1 := NewEvent("CA", "Pebble Beach Golf Links", "Apr 15 2026", "Monterey", "CA - Pebble Beach Golf Links Apr 15 2026 - Monterey", "https://example.com")
+		evt2 := NewEvent("NV", "Pebble Beach Golf Links", "Apr 15 2026", "Las Vegas", "NV - Pebble Beach Golf Links Apr 15 2026 - Las Vegas", "https://example.com")
+		evt3 := NewEvent("TX", "Pebble Beach Golf Links", "Apr 15 2026", "Austin", "TX - Pebble Beach Golf Links Apr 15 2026 - Austin", "https://example.com")
+
+		events := []*Event{evt1, evt2, evt3}
+		deduped := MarkDuplicates(events)
+
+		// Should only have one event (CA comes first alphabetically)
+		if len(deduped) != 1 {
+			t.Errorf("expected 1 deduplicated event, got %d", len(deduped))
+		}
+
+		if deduped[0].State != "CA" {
+			t.Errorf("expected CA event to be primary, got %s", deduped[0].State)
+		}
+
+		// Should have NV and TX in AlsoIn
+		if len(deduped[0].AlsoIn) != 2 {
+			t.Errorf("expected 2 states in AlsoIn, got %d", len(deduped[0].AlsoIn))
+		}
+
+		// Check that AlsoIn contains NV and TX
+		foundNV := false
+		foundTX := false
+		for _, state := range deduped[0].AlsoIn {
+			if state == "NV" {
+				foundNV = true
+			}
+			if state == "TX" {
+				foundTX = true
+			}
+		}
+
+		if !foundNV {
+			t.Error("expected NV in AlsoIn")
+		}
+		if !foundTX {
+			t.Error("expected TX in AlsoIn")
+		}
+	})
+
+	t.Run("handles course name variations", func(t *testing.T) {
+		// Same course with different name variations
+		evt1 := NewEvent("AZ", "Shadow Creek Golf Club", "May 1 2026", "Phoenix", "AZ - Shadow Creek Golf Club May 1 2026 - Phoenix", "https://example.com")
+		evt2 := NewEvent("CA", "Shadow Creek Golf Course", "May 1 2026", "Las Vegas", "CA - Shadow Creek Golf Course May 1 2026 - Las Vegas", "https://example.com")
+		evt3 := NewEvent("NV", "Shadow Creek", "May 1 2026", "Las Vegas", "NV - Shadow Creek May 1 2026 - Las Vegas", "https://example.com")
+
+		events := []*Event{evt1, evt2, evt3}
+		deduped := MarkDuplicates(events)
+
+		// Should deduplicate since "golf club", "golf course" suffixes are normalized
+		if len(deduped) != 1 {
+			t.Errorf("expected 1 deduplicated event, got %d", len(deduped))
+		}
+
+		if len(deduped[0].AlsoIn) != 2 {
+			t.Errorf("expected 2 states in AlsoIn, got %d", len(deduped[0].AlsoIn))
+		}
+	})
+
+	t.Run("does not deduplicate different dates", func(t *testing.T) {
+		// Same course but different dates
+		evt1 := NewEvent("CA", "Pebble Beach", "Apr 15 2026", "Monterey", "CA - Pebble Beach Apr 15 2026 - Monterey", "https://example.com")
+		evt2 := NewEvent("NV", "Pebble Beach", "Apr 22 2026", "Las Vegas", "NV - Pebble Beach Apr 22 2026 - Las Vegas", "https://example.com")
+
+		events := []*Event{evt1, evt2}
+		deduped := MarkDuplicates(events)
+
+		// Should NOT deduplicate (different dates)
+		if len(deduped) != 2 {
+			t.Errorf("expected 2 events (different dates), got %d", len(deduped))
+		}
+
+		// Neither should have AlsoIn
+		for _, evt := range deduped {
+			if len(evt.AlsoIn) > 0 {
+				t.Errorf("expected no AlsoIn for different dates, got %v", evt.AlsoIn)
+			}
+		}
+	})
+
+	t.Run("does not deduplicate different courses", func(t *testing.T) {
+		// Different courses
+		evt1 := NewEvent("CA", "Pebble Beach", "Apr 15 2026", "Monterey", "CA - Pebble Beach Apr 15 2026 - Monterey", "https://example.com")
+		evt2 := NewEvent("NV", "TPC Las Vegas", "Apr 15 2026", "Las Vegas", "NV - TPC Las Vegas Apr 15 2026 - Las Vegas", "https://example.com")
+
+		events := []*Event{evt1, evt2}
+		deduped := MarkDuplicates(events)
+
+		// Should NOT deduplicate (different courses)
+		if len(deduped) != 2 {
+			t.Errorf("expected 2 events (different courses), got %d", len(deduped))
+		}
+	})
+
+	t.Run("handles no duplicates", func(t *testing.T) {
+		// All unique events
+		evt1 := NewEvent("CA", "Event 1", "Apr 15 2026", "Monterey", "CA - Event 1 Apr 15 2026 - Monterey", "https://example.com")
+		evt2 := NewEvent("NV", "Event 2", "Apr 16 2026", "Las Vegas", "NV - Event 2 Apr 16 2026 - Las Vegas", "https://example.com")
+		evt3 := NewEvent("TX", "Event 3", "Apr 17 2026", "Austin", "TX - Event 3 Apr 17 2026 - Austin", "https://example.com")
+
+		events := []*Event{evt1, evt2, evt3}
+		deduped := MarkDuplicates(events)
+
+		// Should keep all events
+		if len(deduped) != 3 {
+			t.Errorf("expected 3 events (no duplicates), got %d", len(deduped))
+		}
+
+		// None should have AlsoIn
+		for _, evt := range deduped {
+			if len(evt.AlsoIn) > 0 {
+				t.Errorf("expected no AlsoIn for unique events, got %v", evt.AlsoIn)
+			}
+		}
+	})
+}
+
+func TestNormalizeCourseTitle(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "removes golf club suffix",
+			input:    "Shadow Creek Golf Club",
+			expected: "shadow creek",
+		},
+		{
+			name:     "removes golf course suffix",
+			input:    "Pebble Beach Golf Course",
+			expected: "pebble beach",
+		},
+		{
+			name:     "removes country club suffix",
+			input:    "Augusta Country Club",
+			expected: "augusta",
+		},
+		{
+			name:     "removes cc abbreviation",
+			input:    "Dallas CC",
+			expected: "dallas",
+		},
+		{
+			name:     "removes gc abbreviation",
+			input:    "Phoenix GC",
+			expected: "phoenix",
+		},
+		{
+			name:     "removes 'the' prefix",
+			input:    "The Sanctuary",
+			expected: "sanctuary",
+		},
+		{
+			name:     "handles multiple variations",
+			input:    "The Pebble Beach Golf Links",
+			expected: "pebble beach golf links",
+		},
+		{
+			name:     "handles extra whitespace",
+			input:    "Shadow   Creek    Golf   Club",
+			expected: "shadow creek",
+		},
+		{
+			name:     "handles lowercase input",
+			input:    "shadow creek golf club",
+			expected: "shadow creek",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := NormalizeCourseTitle(tt.input)
+			if result != tt.expected {
+				t.Errorf("NormalizeCourseTitle(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGenerateDuplicationKey(t *testing.T) {
+	t.Run("same title and date produces same key", func(t *testing.T) {
+		key1 := GenerateDuplicationKey("Pebble Beach Golf Club", "Apr 15 2026")
+		key2 := GenerateDuplicationKey("Pebble Beach Golf Course", "Apr 15 2026")
+
+		if key1 != key2 {
+			t.Error("expected same duplication key for normalized titles")
+		}
+	})
+
+	t.Run("different dates produce different keys", func(t *testing.T) {
+		key1 := GenerateDuplicationKey("Pebble Beach", "Apr 15 2026")
+		key2 := GenerateDuplicationKey("Pebble Beach", "Apr 22 2026")
+
+		if key1 == key2 {
+			t.Error("expected different keys for different dates")
+		}
+	})
+
+	t.Run("different titles produce different keys", func(t *testing.T) {
+		key1 := GenerateDuplicationKey("Pebble Beach", "Apr 15 2026")
+		key2 := GenerateDuplicationKey("Shadow Creek", "Apr 15 2026")
+
+		if key1 == key2 {
+			t.Error("expected different keys for different courses")
+		}
+	})
+}
+
+func TestDiffWithDeduplication(t *testing.T) {
+	t.Run("deduplicates new events across states", func(t *testing.T) {
+		// Create previous snapshot (empty)
+		previous := NewSnapshot()
+
+		// Create current events - same event in three states
+		evt1 := NewEvent("AZ", "Shadow Creek Golf Club", "May 1 2026", "Phoenix", "AZ - Shadow Creek Golf Club May 1 2026 - Phoenix", "https://example.com")
+		evt2 := NewEvent("CA", "Shadow Creek Golf Course", "May 1 2026", "Los Angeles", "CA - Shadow Creek Golf Course May 1 2026 - Los Angeles", "https://example.com")
+		evt3 := NewEvent("NV", "Shadow Creek", "May 1 2026", "Las Vegas", "NV - Shadow Creek May 1 2026 - Las Vegas", "https://example.com")
+		evt4 := NewEvent("TX", "Dallas Country Club", "May 1 2026", "Dallas", "TX - Dallas Country Club May 1 2026 - Dallas", "https://example.com")
+
+		current := []*Event{evt1, evt2, evt3, evt4}
+
+		// Run diff without state filter to check all states
+		result := Diff(previous, current, "")
+
+		// Should have 2 unique events (Shadow Creek deduplicated, Dallas unique)
+		if len(result.NewEvents) != 2 {
+			t.Errorf("expected 2 deduplicated new events, got %d", len(result.NewEvents))
+		}
+
+		// Find the Shadow Creek event (should be AZ, alphabetically first)
+		var shadowCreek *Event
+		var dallas *Event
+		for _, evt := range result.NewEvents {
+			normalized := NormalizeCourseTitle(evt.Title)
+			if normalized == "shadow creek" {
+				shadowCreek = evt
+			} else if normalized == "dallas" {
+				dallas = evt
+			}
+		}
+
+		if shadowCreek == nil {
+			t.Fatal("expected to find Shadow Creek event")
+		}
+		if dallas == nil {
+			t.Fatal("expected to find Dallas event")
+		}
+
+		// Shadow Creek should be the AZ event (alphabetically first)
+		if shadowCreek.State != "AZ" {
+			t.Errorf("expected AZ to be primary state, got %s", shadowCreek.State)
+		}
+
+		// Shadow Creek should have CA and NV in AlsoIn
+		if len(shadowCreek.AlsoIn) != 2 {
+			t.Errorf("expected 2 states in AlsoIn, got %d: %v", len(shadowCreek.AlsoIn), shadowCreek.AlsoIn)
+		}
+
+		// Check that AlsoIn contains CA and NV
+		foundCA := false
+		foundNV := false
+		for _, state := range shadowCreek.AlsoIn {
+			if state == "CA" {
+				foundCA = true
+			}
+			if state == "NV" {
+				foundNV = true
+			}
+		}
+		if !foundCA {
+			t.Error("expected CA in AlsoIn")
+		}
+		if !foundNV {
+			t.Error("expected NV in AlsoIn")
+		}
+
+		// Dallas should not have AlsoIn
+		if len(dallas.AlsoIn) > 0 {
+			t.Errorf("expected Dallas to have no AlsoIn, got %v", dallas.AlsoIn)
+		}
+
+		// State grouping should only have AZ and TX (deduplicated)
+		if len(result.States) != 2 {
+			t.Errorf("expected 2 states in result, got %d", len(result.States))
+		}
+
+		if _, ok := result.States["AZ"]; !ok {
+			t.Error("expected AZ in state groups")
+		}
+		if _, ok := result.States["TX"]; !ok {
+			t.Error("expected TX in state groups")
+		}
+		if _, ok := result.States["CA"]; ok {
+			t.Error("CA should not be in state groups (deduplicated)")
+		}
+		if _, ok := result.States["NV"]; ok {
+			t.Error("NV should not be in state groups (deduplicated)")
+		}
+	})
+
+	t.Run("does not deduplicate events with different dates", func(t *testing.T) {
+		previous := NewSnapshot()
+
+		// Same course, different dates
+		evt1 := NewEvent("AZ", "Pebble Beach", "May 1 2026", "Phoenix", "AZ - Pebble Beach May 1 2026 - Phoenix", "https://example.com")
+		evt2 := NewEvent("CA", "Pebble Beach", "May 8 2026", "Los Angeles", "CA - Pebble Beach May 8 2026 - Los Angeles", "https://example.com")
+
+		current := []*Event{evt1, evt2}
+		result := Diff(previous, current, "")
+
+		// Should keep both events (different dates)
+		if len(result.NewEvents) != 2 {
+			t.Errorf("expected 2 events (different dates), got %d", len(result.NewEvents))
+		}
+
+		// Neither should have AlsoIn
+		for _, evt := range result.NewEvents {
+			if len(evt.AlsoIn) > 0 {
+				t.Errorf("expected no AlsoIn for different dates, got %v for %s", evt.AlsoIn, evt.State)
+			}
+		}
+	})
+}

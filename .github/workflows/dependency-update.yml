@@ -1,0 +1,250 @@
+name: Dependency Update
+
+on:
+  schedule:
+    # Run weekly on Sundays at 9 AM UTC
+    - cron: '0 9 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-dependencies:
+    name: Update Go Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Check for updates
+        id: check
+        run: |
+          echo "Checking for dependency updates..."
+
+          # Get current dependencies
+          go list -m -u -json all > deps-before.json
+
+          # Count available updates
+          UPDATES=$(jq -r 'select(.Update != null) | .Path' deps-before.json | wc -l)
+          echo "updates=$UPDATES" >> $GITHUB_OUTPUT
+          echo "Found $UPDATES available updates"
+
+          # List updates
+          if [ "$UPDATES" -gt 0 ]; then
+            echo "## Available Dependency Updates" > update-summary.md
+            echo "" >> update-summary.md
+            jq -r 'select(.Update != null) | "- **\(.Path)**: \(.Version) → \(.Update.Version)"' deps-before.json >> update-summary.md
+          fi
+
+      - name: Update dependencies
+        if: steps.check.outputs.updates > 0
+        run: |
+          echo "Updating dependencies..."
+
+          # Update all dependencies
+          go get -u ./...
+          go mod tidy
+
+          # Run tests to verify updates don't break anything
+          if ! go test ./...; then
+            echo "⚠️ Tests failed after dependency update"
+            echo "Rolling back updates..."
+            git checkout go.mod go.sum
+            exit 1
+          fi
+
+      - name: Generate update report
+        if: steps.check.outputs.updates > 0
+        run: |
+          echo "## Dependency Update Report" > report.md
+          echo "" >> report.md
+          echo "Generated: $(date -u)" >> report.md
+          echo "" >> report.md
+
+          # Show what changed
+          if [ -f update-summary.md ]; then
+            cat update-summary.md >> report.md
+            echo "" >> report.md
+          fi
+
+          # Run security scan on new dependencies
+          echo "## Security Scan" >> report.md
+          echo "" >> report.md
+
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          if govulncheck ./... > vuln-check.txt 2>&1; then
+            echo "✅ No vulnerabilities found in updated dependencies" >> report.md
+          else
+            echo "⚠️ **Vulnerabilities found:**" >> report.md
+            echo '```' >> report.md
+            cat vuln-check.txt >> report.md
+            echo '```' >> report.md
+          fi
+
+          echo "" >> report.md
+          echo "## Test Results" >> report.md
+          echo "" >> report.md
+          echo "✅ All tests pass with updated dependencies" >> report.md
+
+      - name: Create Pull Request
+        if: steps.check.outputs.updates > 0
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Deps: Update Go dependencies"
+          branch: deps/auto-update-${{ github.run_number }}
+          title: "Update Go dependencies (automated)"
+          body-path: report.md
+          labels: dependencies,automated
+          assignees: pfrederiksen
+
+  update-github-actions:
+    name: Update GitHub Actions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check action versions
+        id: check-actions
+        run: |
+          echo "Checking GitHub Actions versions..."
+
+          # Find all action references
+          ACTIONS=$(grep -r "uses:" .github/workflows/*.yml | grep -v "#" | awk '{print $3}' | sort -u)
+
+          echo "## GitHub Actions Version Check" > actions-report.md
+          echo "" >> actions-report.md
+
+          OUTDATED=0
+          for action in $ACTIONS; do
+            echo "Checking $action..."
+            # This is a simplified check - in production you'd query GitHub API
+            echo "- $action" >> actions-report.md
+          done
+
+          echo "outdated=$OUTDATED" >> $GITHUB_OUTPUT
+
+      - name: Create Actions update PR
+        if: steps.check-actions.outputs.outdated > 0
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Deps: Update GitHub Actions versions"
+          branch: deps/update-actions-${{ github.run_number }}
+          title: "Update GitHub Actions (automated)"
+          body-path: actions-report.md
+          labels: dependencies,github-actions,automated
+
+  check-go-version:
+    name: Check Go Version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get latest Go version
+        id: go-version
+        run: |
+          # Get current Go version from go.mod
+          CURRENT=$(grep "^go " go.mod | awk '{print $2}')
+          echo "current=$CURRENT" >> $GITHUB_OUTPUT
+
+          # Get latest stable Go version
+          LATEST=$(curl -s https://go.dev/VERSION?m=text | head -1 | sed 's/go//')
+          echo "latest=$LATEST" >> $GITHUB_OUTPUT
+
+          echo "Current Go version: $CURRENT"
+          echo "Latest Go version: $LATEST"
+
+      - name: Create Go version update issue
+        if: steps.go-version.outputs.current != steps.go-version.outputs.latest
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const current = '${{ steps.go-version.outputs.current }}';
+            const latest = '${{ steps.go-version.outputs.latest }}';
+
+            // Check if issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'go-version'
+            });
+
+            const existingIssue = issues.data.find(issue =>
+              issue.title.includes('Update Go version')
+            );
+
+            if (existingIssue) {
+              console.log('Issue already exists:', existingIssue.number);
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Update Go version from ${current} to ${latest}`,
+                body: `A new Go version is available.\n\n**Current:** ${current}\n**Latest:** ${latest}\n\nConsider updating:\n- go.mod\n- .github/workflows/*.yml\n- README.md`,
+                labels: ['dependencies', 'go-version']
+              });
+            }
+
+  security-advisories:
+    name: Check Security Advisories
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Check for CVEs
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+
+          echo "## Dependency Security Check" > security-report.md
+          echo "" >> security-report.md
+          echo "Checked: $(date -u)" >> security-report.md
+          echo "" >> security-report.md
+
+          if govulncheck ./... > vuln-output.txt 2>&1; then
+            echo "✅ No known vulnerabilities in dependencies" >> security-report.md
+          else
+            echo "⚠️ **Vulnerabilities Found**" >> security-report.md
+            echo "" >> security-report.md
+            echo '```' >> security-report.md
+            cat vuln-output.txt >> security-report.md
+            echo '```' >> security-report.md
+
+            # Create high-priority issue
+            echo "Creating security issue..."
+            cat security-report.md
+          fi
+
+      - name: Create security issue if vulnerabilities found
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('security-report.md', 'utf8');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 Security: Vulnerabilities detected in dependencies',
+              body: report,
+              labels: ['security', 'dependencies', 'high-priority']
+            });

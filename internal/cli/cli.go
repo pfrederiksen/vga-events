@@ -172,6 +172,7 @@ func handleShowAll(currentEvents []*event.Event, state string, format OutputForm
 }
 
 // runCheck is the main command logic
+// nolint:gocyclo // TODO: Refactor to reduce complexity
 func runCheck(cmd *cobra.Command, args []string) error {
 	// Normalize state code
 	state := strings.ToUpper(strings.TrimSpace(flagCheckState))
@@ -257,6 +258,36 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Create new snapshot with filtered events
 	newSnapshot := event.CreateSnapshot(eventsToSave, time.Now().UTC().Format(time.RFC3339))
 
+	// Detect changes between snapshots (date/title/city changes)
+	var changedEvents []*event.EventChange
+	if previous != nil {
+		// Build current events map for change detection
+		currentEventsMap := make(map[string]*event.Event)
+		for _, evt := range eventsToSave {
+			currentEventsMap[evt.ID] = evt
+		}
+
+		// Compare snapshots to detect changes
+		changedEvents = event.CompareSnapshots(previous.Events, currentEventsMap, previous.StableIndex, newSnapshot.StableIndex)
+
+		// Filter out "new" and "removed" change types - those are handled separately
+		filteredChanges := make([]*event.EventChange, 0)
+		for _, change := range changedEvents {
+			if change.ChangeType != "new" && change.ChangeType != "removed" {
+				filteredChanges = append(filteredChanges, change)
+			}
+		}
+		changedEvents = filteredChanges
+
+		// Store changes in the new snapshot's ChangeLog
+		newSnapshot.ChangeLog = append(newSnapshot.ChangeLog, changedEvents...)
+
+		// Keep only the most recent 100 changes to prevent unbounded growth
+		if len(newSnapshot.ChangeLog) > 100 {
+			newSnapshot.ChangeLog = newSnapshot.ChangeLog[len(newSnapshot.ChangeLog)-100:]
+		}
+	}
+
 	// Store removed events in snapshot (kept for 30 days)
 	if len(diff.RemovedEvents) > 0 {
 		newSnapshot.StoreRemovedEvents(diff.RemovedEvents)
@@ -279,6 +310,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		CheckedAt:     time.Now().UTC(),
 		NewEvents:     diff.NewEvents,
 		RemovedEvents: diff.RemovedEvents,
+		ChangedEvents: changedEvents,
 		EventCount:    len(diff.NewEvents),
 	}
 

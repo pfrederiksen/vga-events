@@ -1,0 +1,194 @@
+name: Documentation Sync Guardian
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.go'
+      - 'README.md'
+      - 'CLAUDE.md'
+      - 'cmd/**'
+      - 'internal/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  doc-sync:
+    name: Check Documentation Sync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Check for undocumented commands
+        id: commands
+        run: |
+          echo "# Documentation Sync Check" > doc-report.md
+          echo "" >> doc-report.md
+
+          # Extract commands from bot code (only from case statements)
+          COMMANDS=$(grep 'case "/' cmd/vga-events-bot/main.go | grep -o '"/[a-z-]*"' | tr -d '"' | sort -u | tr '\n' ' ')
+          echo "Commands found in code: $COMMANDS"
+
+          # Check README
+          MISSING_README=""
+          for cmd in $COMMANDS; do
+            if ! grep -q "$cmd" README.md; then
+              MISSING_README="$MISSING_README $cmd"
+            fi
+          done
+
+          # Check CLAUDE.md
+          MISSING_CLAUDE=""
+          for cmd in $COMMANDS; do
+            if ! grep -q "$cmd" CLAUDE.md; then
+              MISSING_CLAUDE="$MISSING_CLAUDE $cmd"
+            fi
+          done
+
+          if [ -n "$MISSING_README" ] || [ -n "$MISSING_CLAUDE" ]; then
+            echo "## ⚠️ Undocumented Commands Found" >> doc-report.md
+            echo "" >> doc-report.md
+
+            if [ -n "$MISSING_README" ]; then
+              echo "**Missing from README.md:**" >> doc-report.md
+              echo '```' >> doc-report.md
+              echo "$MISSING_README" >> doc-report.md
+              echo '```' >> doc-report.md
+              echo "" >> doc-report.md
+            fi
+
+            if [ -n "$MISSING_CLAUDE" ]; then
+              echo "**Missing from CLAUDE.md:**" >> doc-report.md
+              echo '```' >> doc-report.md
+              echo "$MISSING_CLAUDE" >> doc-report.md
+              echo '```' >> doc-report.md
+              echo "" >> doc-report.md
+            fi
+
+            echo "status=warning" >> $GITHUB_OUTPUT
+          else
+            echo "## ✅ All Commands Documented" >> doc-report.md
+            echo "" >> doc-report.md
+            echo "All commands found in code are documented in README.md and CLAUDE.md" >> doc-report.md
+            echo "status=success" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check for missing godoc comments
+        id: godoc
+        run: |
+          echo "" >> doc-report.md
+          echo "## Exported Functions/Types" >> doc-report.md
+          echo "" >> doc-report.md
+
+          # Find exported functions without godoc comments
+          # Check if line before starts with //
+          MISSING_GODOC=$(find ./internal -name "*.go" -not -name "*_test.go" -exec awk '
+            /^\/\// { comment=1; next }
+            /^$/ { comment=0; next }
+            /^func [A-Z]/ || /^type [A-Z]/ {
+              if (!comment) print FILENAME ":" NR ":" $0
+              comment=0
+            }
+            { comment=0 }
+          ' {} \; | head -20 || true)
+
+          if [ -n "$MISSING_GODOC" ]; then
+            echo "⚠️ **Found exported functions/types without godoc comments:**" >> doc-report.md
+            echo "" >> doc-report.md
+            echo '```' >> doc-report.md
+            echo "$MISSING_GODOC" | head -20 >> doc-report.md
+            echo '```' >> doc-report.md
+            echo "" >> doc-report.md
+            echo "Consider adding godoc comments for exported functions and types." >> doc-report.md
+            echo "godoc=warning" >> $GITHUB_OUTPUT
+          else
+            echo "✅ **All exported functions have godoc comments**" >> doc-report.md
+            echo "godoc=success" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check version consistency
+        id: version
+        run: |
+          echo "" >> doc-report.md
+          echo "## Version Consistency" >> doc-report.md
+          echo "" >> doc-report.md
+
+          # Extract version from CLAUDE.md
+          CLAUDE_VERSION=$(grep -m1 "^**v[0-9]" CLAUDE.md | sed 's/\*\*v\([0-9.]*\).*/\1/' || echo "unknown")
+
+          # Extract version from README.md
+          README_VERSION=$(grep -m1 "v[0-9]\.[0-9]" README.md | grep -o "v[0-9]\.[0-9]\.[0-9]" | head -1 | sed 's/v//' || echo "unknown")
+
+          echo "CLAUDE.md version: $CLAUDE_VERSION"
+          echo "README.md version: $README_VERSION"
+
+          if [ "$CLAUDE_VERSION" != "$README_VERSION" ]; then
+            echo "⚠️ **Version mismatch detected:**" >> doc-report.md
+            echo "" >> doc-report.md
+            echo "- CLAUDE.md: v$CLAUDE_VERSION" >> doc-report.md
+            echo "- README.md: v$README_VERSION" >> doc-report.md
+            echo "" >> doc-report.md
+            echo "Please ensure version numbers are consistent across documentation." >> doc-report.md
+            echo "version=warning" >> $GITHUB_OUTPUT
+          else
+            echo "✅ **Version numbers are consistent:** v$CLAUDE_VERSION" >> doc-report.md
+            echo "version=success" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('doc-report.md', 'utf8');
+
+            // Find existing doc-sync comment
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.data.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Documentation Sync Check')
+            );
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: report
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: report
+              });
+            }
+
+      - name: Fail if critical issues found
+        run: |
+          if [ "${{ steps.commands.outputs.status }}" == "warning" ]; then
+            echo "⚠️ Found undocumented commands - please update documentation"
+            # Don't fail the build, just warn
+          fi
+          echo "✅ Documentation sync check complete"

@@ -566,6 +566,373 @@ func TestFormatRemovedEvent(t *testing.T) {
 	})
 }
 
+func TestFormatEventWithNote(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test123",
+		State:    "NV",
+		Title:    "Chimera Golf Club",
+		DateText: "Apr 4 2026",
+		City:     "Las Vegas",
+	}
+
+	t.Run("with note", func(t *testing.T) {
+		note := "Early tee time, bringing friends"
+		msg := FormatEventWithNote(evt, note)
+
+		if !strings.Contains(msg, "📝") {
+			t.Error("Message should contain note emoji")
+		}
+		if !strings.Contains(msg, note) {
+			t.Error("Message should contain the note text")
+		}
+	})
+
+	t.Run("without note", func(t *testing.T) {
+		msg := FormatEventWithNote(evt, "")
+
+		if !strings.Contains(msg, "🏌️") {
+			t.Error("Message should contain golf emoji")
+		}
+		if !strings.Contains(msg, "NV") {
+			t.Error("Message should contain state")
+		}
+		if !strings.Contains(msg, "Chimera Golf Club") {
+			t.Error("Message should contain title")
+		}
+	})
+}
+
+func TestFormatEventWithCourse(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test123",
+		State:    "NV",
+		Title:    "Pebble Beach",
+		DateText: "Apr 4 2026",
+		City:     "Monterey",
+	}
+
+	course := &CourseDetails{
+		Name: "Pebble Beach Golf Links",
+		Tees: []TeeDetails{
+			{
+				Name:    "Championship",
+				Par:     72,
+				Yardage: 7041,
+				Slope:   145,
+				Rating:  75.5,
+				Holes:   18,
+			},
+		},
+	}
+
+	t.Run("with course details", func(t *testing.T) {
+		msg := FormatEventWithCourse(evt, course, "")
+
+		if !strings.Contains(msg, "Championship") {
+			t.Error("Message should contain tee name")
+		}
+		// Yardage is formatted with commas (7,041)
+		if !strings.Contains(msg, "7,041") && !strings.Contains(msg, "7041") {
+			t.Error("Message should contain yardage")
+		}
+		if !strings.Contains(msg, "Par 72") {
+			t.Error("Message should contain par")
+		}
+	})
+
+	t.Run("with course and note", func(t *testing.T) {
+		note := "Bucket list course!"
+		msg := FormatEventWithCourse(evt, course, note)
+
+		if !strings.Contains(msg, note) {
+			t.Error("Message should contain note")
+		}
+		if !strings.Contains(msg, "📝") {
+			t.Error("Message should contain note emoji")
+		}
+	})
+
+	t.Run("without course details", func(t *testing.T) {
+		msg := FormatEventWithCourse(evt, nil, "")
+
+		if !strings.Contains(msg, "Pebble Beach") {
+			t.Error("Message should contain event title")
+		}
+	})
+}
+
+func TestTeeDetails(t *testing.T) {
+	tee := TeeDetails{
+		Name:    "Championship",
+		Par:     72,
+		Yardage: 7200,
+		Slope:   145,
+		Rating:  75.5,
+		Holes:   18,
+	}
+
+	if tee.Name != "Championship" {
+		t.Errorf("Name = %q, want Championship", tee.Name)
+	}
+	if tee.Par != 72 {
+		t.Errorf("Par = %d, want 72", tee.Par)
+	}
+	if tee.Yardage != 7200 {
+		t.Errorf("Yardage = %d, want 7200", tee.Yardage)
+	}
+	if tee.Slope != 145 {
+		t.Errorf("Slope = %d, want 145", tee.Slope)
+	}
+	if tee.Rating != 75.5 {
+		t.Errorf("Rating = %f, want 75.5", tee.Rating)
+	}
+	if tee.Holes != 18 {
+		t.Errorf("Holes = %d, want 18", tee.Holes)
+	}
+}
+
+func TestCourseDetails(t *testing.T) {
+	course := &CourseDetails{
+		Name:    "Pebble Beach Golf Links",
+		Website: "https://pebblebeach.com",
+		Phone:   "831-622-8723",
+		Tees: []TeeDetails{
+			{Name: "Championship", Par: 72, Yardage: 7041},
+			{Name: "Blue", Par: 72, Yardage: 6737},
+		},
+	}
+
+	if course.Name != "Pebble Beach Golf Links" {
+		t.Errorf("Name = %q, want Pebble Beach Golf Links", course.Name)
+	}
+	if len(course.Tees) != 2 {
+		t.Errorf("Tees length = %d, want 2", len(course.Tees))
+	}
+	if course.Tees[0].Name != "Championship" {
+		t.Errorf("First tee name = %q, want Championship", course.Tees[0].Name)
+	}
+}
+
+func TestFormatEvent_AlsoIn(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test123",
+		State:    "NV",
+		Title:    "Multi-State Event",
+		DateText: "Apr 4 2026",
+		City:     "Las Vegas",
+		AlsoIn:   []string{"CA", "AZ"},
+	}
+
+	msg := FormatEvent(evt)
+
+	if !strings.Contains(msg, "Also in") {
+		t.Error("Message should contain 'Also in' text for multi-state events")
+	}
+	if !strings.Contains(msg, "CA") {
+		t.Error("Message should mention CA state")
+	}
+	if !strings.Contains(msg, "AZ") {
+		t.Error("Message should mention AZ state")
+	}
+}
+
+func TestFormatEventChange(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test123",
+		State:    "NV",
+		Title:    "Test Event",
+		DateText: "Apr 4 2026",
+		City:     "Las Vegas",
+	}
+
+	msg := FormatEventChange(evt, "title", "Old Title", "New Title")
+
+	if !strings.Contains(msg, "Event Updated") {
+		t.Error("Message should contain 'Event Updated'")
+	}
+	if !strings.Contains(msg, "Old Title") {
+		t.Error("Message should contain old value")
+	}
+	if !strings.Contains(msg, "New Title") {
+		t.Error("Message should contain new value")
+	}
+}
+
+func TestFormatEventChangeWithKeyboard(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test123",
+		State:    "NV",
+		Title:    "Test Event",
+		DateText: "Apr 4 2026",
+	}
+
+	msg, keyboard := FormatEventChangeWithKeyboard(evt, "date", "Apr 4 2026", "Apr 10 2026", "interested")
+
+	if !strings.Contains(msg, "Test Event") {
+		t.Error("Message should contain event title")
+	}
+
+	if keyboard == nil {
+		t.Error("Keyboard should not be nil")
+	}
+}
+
+func TestFormatEventChangeWithNote(t *testing.T) {
+	evt := &event.Event{
+		ID:    "test123",
+		State: "NV",
+		Title: "Test Event",
+	}
+
+	note := "My personal note"
+	msg, keyboard := FormatEventChangeWithNote(evt, "title", "Old Title", "New Title", "registered", note)
+
+	if !strings.Contains(msg, note) {
+		t.Error("Message should contain note")
+	}
+	if !strings.Contains(msg, "📝") {
+		t.Error("Message should contain note emoji")
+	}
+	if keyboard == nil {
+		t.Error("Keyboard should not be nil")
+	}
+}
+
+func TestFormatEventWithStatusAndCourse(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test123",
+		State:    "NV",
+		Title:    "Test Event",
+		DateText: "Apr 4 2026",
+		City:     "Las Vegas",
+	}
+
+	course := &CourseDetails{
+		Name: "Test Golf Course",
+		Tees: []TeeDetails{
+			{
+				Name:    "Championship",
+				Par:     72,
+				Yardage: 7200,
+			},
+		},
+	}
+
+	prefs := preferences.NewPreferences()
+	msg, keyboard := FormatEventWithStatusAndCourse(evt, course, "interested", "", "12345", prefs)
+
+	if !strings.Contains(msg, "Test Event") {
+		t.Error("Message should contain event title")
+	}
+	if !strings.Contains(msg, "⭐") {
+		t.Error("Message should contain interested emoji")
+	}
+	if !strings.Contains(msg, "Test Golf Course") {
+		t.Error("Message should contain course name")
+	}
+	if keyboard == nil {
+		t.Error("Keyboard should not be nil")
+	}
+}
+
+func TestFormatEventWithStatusAndNote(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test123",
+		State:    "NV",
+		Title:    "Test Event",
+		DateText: "Apr 4 2026",
+		City:     "Las Vegas",
+	}
+
+	prefs := preferences.NewPreferences()
+	note := "Great course!"
+
+	tests := []struct {
+		name   string
+		status string
+		note   string
+	}{
+		{
+			name:   "with interested status and note",
+			status: "interested",
+			note:   note,
+		},
+		{
+			name:   "with registered status no note",
+			status: "registered",
+			note:   "",
+		},
+		{
+			name:   "with maybe status and note",
+			status: "maybe",
+			note:   note,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, keyboard := FormatEventWithStatusAndNote(evt, tt.status, tt.note, "12345", prefs)
+
+			if !strings.Contains(msg, "Test Event") {
+				t.Error("Message should contain event title")
+			}
+
+			if tt.note != "" && !strings.Contains(msg, tt.note) {
+				t.Error("Message should contain note")
+			}
+
+			if keyboard == nil {
+				t.Error("Keyboard should not be nil")
+			}
+
+			// Check status emoji
+			switch tt.status {
+			case "interested":
+				if !strings.Contains(msg, "⭐") {
+					t.Error("Message should contain interested emoji")
+				}
+			case "registered":
+				if !strings.Contains(msg, "✅") {
+					t.Error("Message should contain registered emoji")
+				}
+			case "maybe":
+				if !strings.Contains(msg, "🤔") {
+					t.Error("Message should contain maybe emoji")
+				}
+			}
+		})
+	}
+}
+
+func TestFormatYardage(t *testing.T) {
+	// This is a private function but we can test the public functions that use it
+	evt := &event.Event{
+		ID:       "test123",
+		State:    "NV",
+		Title:    "Test Event",
+		DateText: "Apr 4 2026",
+		City:     "Las Vegas",
+	}
+
+	course := &CourseDetails{
+		Name: "Test Course",
+		Tees: []TeeDetails{
+			{
+				Name:    "Championship",
+				Par:     72,
+				Yardage: 7041, // Should be formatted as "7,041"
+			},
+		},
+	}
+
+	msg := FormatEventWithCourse(evt, course, "")
+
+	// Check that yardage is formatted with comma
+	if !strings.Contains(msg, "7,041") && !strings.Contains(msg, "7041") {
+		t.Error("Message should contain formatted yardage")
+	}
+}
+
 func TestFormatRemovedEventGeneral(t *testing.T) {
 	evt := &event.Event{
 		ID:       "test-removed-2",

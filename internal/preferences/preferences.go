@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pfrederiksen/vga-events/internal/event"
+	"github.com/pfrederiksen/vga-events/internal/filter"
 )
 
 const (
@@ -73,6 +74,10 @@ type UserPreferences struct {
 	ShareEvents        bool                `json:"share_events,omitempty"`        // Default: false (privacy)
 	InviteCode         string              `json:"invite_code,omitempty"`         // This user's invite code
 	GroupSubscriptions map[string][]string `json:"group_subscriptions,omitempty"` // group ID → member chat IDs
+
+	// Event filtering (v0.7.0)
+	SavedFilters map[string]*filter.FilterPreset `json:"saved_filters,omitempty"` // name → filter preset
+	ActiveFilter string                          `json:"active_filter,omitempty"` // name of active filter
 }
 
 // WeeklyStats tracks user engagement metrics for a week
@@ -120,7 +125,7 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		if user.DigestFrequency == "" {
 			user.DigestFrequency = DigestFrequencyImmediate // Keep current behavior
 		}
-		if user.DigestHour == 0 && user.DigestFrequency != "immediate" {
+		if user.DigestHour == 0 && user.DigestFrequency != DigestFrequencyImmediate {
 			user.DigestHour = 9 // 9 AM UTC default
 		}
 		if user.DigestDayOfWeek == 0 && user.DigestFrequency == "weekly" {
@@ -163,6 +168,10 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		if user.GroupSubscriptions == nil {
 			user.GroupSubscriptions = make(map[string][]string)
 		}
+		// Migration: initialize filter fields for existing users
+		if user.SavedFilters == nil {
+			user.SavedFilters = make(map[string]*filter.FilterPreset)
+		}
 		// Note: ShareEvents defaults to false (zero value) - user must opt in
 		// Note: HidePastEvents defaults to false (zero value) for backward compatibility
 		// Users can enable it via settings
@@ -193,6 +202,8 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 		ShareEvents:        false, // Privacy: opt-in only
 		InviteCode:         generateInviteCode(chatID),
 		GroupSubscriptions: make(map[string][]string),
+		SavedFilters:       make(map[string]*filter.FilterPreset), // New feature: saved filters
+		ActiveFilter:       "",                                    // No active filter by default
 	}
 	return p[chatID]
 }
@@ -664,4 +675,117 @@ func (p Preferences) GetFriendsForEvent(chatID, eventID string) []string {
 	}
 
 	return friendsForEvent
+}
+
+// Filter Management Methods
+
+// SaveFilter saves a filter preset with the given name
+func (u *UserPreferences) SaveFilter(name string, f *filter.Filter) {
+	if u.SavedFilters == nil {
+		u.SavedFilters = make(map[string]*filter.FilterPreset)
+	}
+
+	// Check if filter already exists (update case)
+	if existing, exists := u.SavedFilters[name]; exists {
+		existing.Filter = f
+		existing.UpdatedAt = time.Now().UTC()
+	} else {
+		// Create new preset
+		u.SavedFilters[name] = filter.NewFilterPreset(name, f)
+	}
+}
+
+// GetFilter retrieves a saved filter by name
+func (u *UserPreferences) GetFilter(name string) *filter.Filter {
+	if u.SavedFilters == nil {
+		return nil
+	}
+
+	preset, exists := u.SavedFilters[name]
+	if !exists {
+		return nil
+	}
+
+	return preset.Filter
+}
+
+// DeleteFilter removes a saved filter by name
+func (u *UserPreferences) DeleteFilter(name string) bool {
+	if u.SavedFilters == nil {
+		return false
+	}
+
+	_, exists := u.SavedFilters[name]
+	if !exists {
+		return false
+	}
+
+	delete(u.SavedFilters, name)
+
+	// Clear active filter if it was the deleted one
+	if u.ActiveFilter == name {
+		u.ActiveFilter = ""
+	}
+
+	return true
+}
+
+// GetAllFilterNames returns all saved filter names
+func (u *UserPreferences) GetAllFilterNames() []string {
+	if len(u.SavedFilters) == 0 {
+		return []string{}
+	}
+
+	names := make([]string, 0, len(u.SavedFilters))
+	for name := range u.SavedFilters {
+		names = append(names, name)
+	}
+
+	return names
+}
+
+// SetActiveFilter sets the active filter by name
+func (u *UserPreferences) SetActiveFilter(name string) bool {
+	if u.SavedFilters == nil {
+		return false
+	}
+
+	// Allow empty string to clear active filter
+	if name == "" {
+		u.ActiveFilter = ""
+		return true
+	}
+
+	_, exists := u.SavedFilters[name]
+	if !exists {
+		return false
+	}
+
+	u.ActiveFilter = name
+	return true
+}
+
+// GetActiveFilter returns the currently active filter, or nil if none
+func (u *UserPreferences) GetActiveFilter() *filter.Filter {
+	if u.ActiveFilter == "" {
+		return nil
+	}
+
+	return u.GetFilter(u.ActiveFilter)
+}
+
+// ClearActiveFilter removes the active filter
+func (u *UserPreferences) ClearActiveFilter() {
+	u.ActiveFilter = ""
+}
+
+// ApplyFiltersToEvents applies the active filter to a list of events
+// Returns filtered events, or original events if no active filter
+func (u *UserPreferences) ApplyFiltersToEvents(events []*event.Event) []*event.Event {
+	activeFilter := u.GetActiveFilter()
+	if activeFilter == nil {
+		return events
+	}
+
+	return activeFilter.Apply(events)
 }

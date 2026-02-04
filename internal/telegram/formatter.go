@@ -45,6 +45,11 @@ func FormatEventWithNote(evt *event.Event, note string) string {
 	// State and course
 	msg.WriteString(fmt.Sprintf("📍 <b>%s</b> - %s\n", evt.State, evt.Title))
 
+	// Show if event appears in other states (deduplication)
+	if len(evt.AlsoIn) > 0 {
+		msg.WriteString(fmt.Sprintf("   <i>Also in: %s</i>\n", strings.Join(evt.AlsoIn, ", ")))
+	}
+
 	// Date (if available) - use enhanced formatting
 	if evt.DateText != "" {
 		niceDate := event.FormatDateNice(evt.DateText)
@@ -85,6 +90,11 @@ func FormatEventWithCourse(evt *event.Event, course *CourseDetails, note string)
 
 	// State and course
 	msg.WriteString(fmt.Sprintf("📍 <b>%s</b> - %s\n", evt.State, evt.Title))
+
+	// Show if event appears in other states (deduplication)
+	if len(evt.AlsoIn) > 0 {
+		msg.WriteString(fmt.Sprintf("   <i>Also in: %s</i>\n", strings.Join(evt.AlsoIn, ", ")))
+	}
 
 	// Date (if available) - use enhanced formatting
 	if evt.DateText != "" {
@@ -344,6 +354,11 @@ func FormatReminder(evt *event.Event, daysUntil int) (string, *InlineKeyboardMar
 	// Event details
 	msg.WriteString(fmt.Sprintf("🏌️ <b>%s</b> - %s\n", evt.State, evt.Title))
 
+	// Show if event appears in other states (deduplication)
+	if len(evt.AlsoIn) > 0 {
+		msg.WriteString(fmt.Sprintf("   <i>Also in: %s</i>\n", strings.Join(evt.AlsoIn, ", ")))
+	}
+
 	// Date (if available) - use enhanced formatting
 	if evt.DateText != "" {
 		niceDate := event.FormatDateNice(evt.DateText)
@@ -462,6 +477,18 @@ func FormatEventChangeWithKeyboard(evt *event.Event, changeType, oldValue, newVa
 				{Text: "✅ Acknowledged", CallbackData: fmt.Sprintf("ack-change:%s", evt.ID)},
 			},
 		},
+	}
+
+	return text, keyboard
+}
+
+// FormatEventChangeWithNote formats an event change with status and note
+func FormatEventChangeWithNote(evt *event.Event, changeType, oldValue, newValue, currentStatus, note string) (string, *InlineKeyboardMarkup) {
+	text, keyboard := FormatEventChangeWithKeyboard(evt, changeType, oldValue, newValue, currentStatus)
+
+	// Add user's note if provided
+	if note != "" {
+		text = fmt.Sprintf("%s\n\n📝 <i>Your note: %s</i>", text, note)
 	}
 
 	return text, keyboard

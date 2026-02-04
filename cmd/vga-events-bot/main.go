@@ -14,6 +14,7 @@ import (
 	"github.com/pfrederiksen/vga-events/internal/calendar"
 	"github.com/pfrederiksen/vga-events/internal/course"
 	"github.com/pfrederiksen/vga-events/internal/event"
+	"github.com/pfrederiksen/vga-events/internal/filter"
 	"github.com/pfrederiksen/vga-events/internal/preferences"
 	"github.com/pfrederiksen/vga-events/internal/scraper"
 	"github.com/pfrederiksen/vga-events/internal/telegram"
@@ -935,6 +936,11 @@ func processCommand(prefs preferences.Preferences, chatID, text string, modified
 
 	switch command {
 	case "/start", "/help":
+		// Check if user requested help for a specific command
+		if len(parts) >= 2 {
+			cmdName := strings.ToLower(strings.TrimPrefix(parts[1], "/"))
+			return getCommandHelp(cmdName), nil
+		}
 		return getHelpMessage(), nil
 
 	case "/subscribe":
@@ -1063,8 +1069,52 @@ Please provide a search keyword.
 		return handleNotifyRemovals(prefs, chatID, arg, modified)
 
 	case "/bulk":
-		return handleBulkWithKeyboard(prefs, chatID, botToken, dryRun)
+		// Handle bulk operations with subcommands
+		if len(parts) < 2 {
+			// No subcommand - show keyboard menu
+			return handleBulkWithKeyboard(prefs, chatID, botToken, dryRun)
+		}
 
+		subcommand := strings.ToLower(parts[1])
+		switch subcommand {
+		case "register":
+			// /bulk register <event_ids>
+			if len(parts) < 3 {
+				return "❌ Please specify event IDs.\n\nUsage: /bulk register &lt;event_id1&gt; &lt;event_id2&gt; ...\nUsage: /bulk register &lt;event_id1,event_id2,...&gt;", nil
+			}
+			eventIDs := parseBulkEventIDs(parts[2:])
+			return handleBulkRegister(prefs, chatID, eventIDs, modified)
+
+		case "note":
+			// /bulk note <event_ids> <note_text>
+			if len(parts) < 4 {
+				return "❌ Please specify event IDs and note text.\n\nUsage: /bulk note &lt;event_id1,event_id2&gt; &lt;note_text&gt;", nil
+			}
+			// First part after "note" is event IDs (can be comma-separated or space-separated if quoted)
+			eventIDsPart := parts[2]
+			eventIDs := parseEventIDList(eventIDsPart)
+
+			// Rest is note text
+			noteText := strings.Join(parts[3:], " ")
+			noteText, errMsg := validateUserInput(noteText, 500, "Note text")
+			if errMsg != "" {
+				return errMsg, nil
+			}
+			return handleBulkNote(prefs, chatID, eventIDs, noteText, modified)
+
+		case "status":
+			// /bulk status <status> <event_ids>
+			if len(parts) < 4 {
+				return "❌ Please specify status and event IDs.\n\nUsage: /bulk status &lt;interested|registered|maybe|skip&gt; &lt;event_id1,event_id2&gt;", nil
+			}
+			status := strings.ToLower(parts[2])
+			eventIDsPart := parts[3]
+			eventIDs := parseEventIDList(eventIDsPart)
+			return handleBulkStatus(prefs, chatID, status, eventIDs, modified)
+
+		default:
+			return fmt.Sprintf("❌ Unknown bulk subcommand: %s\n\nAvailable: register, note, status\nOr use /bulk without parameters for menu.", subcommand), nil
+		}
 	case "/stats":
 		// Optional parameter: week, month, all
 		period := "week"
@@ -1088,6 +1138,122 @@ Please provide a search keyword.
 		}
 		return handleJoin(prefs, chatID, parts[1], modified), nil
 
+	case "/filter":
+		// Handle filter operations with subcommands
+		if len(parts) < 2 {
+			// No subcommand - show current filter status
+			return handleFilterStatus(prefs, chatID)
+		}
+
+		subcommand := strings.ToLower(parts[1])
+		switch subcommand {
+		case "date":
+			if len(parts) < 3 {
+				return `❌ Please specify a date range.
+
+Usage: /filter date "Mar 1-15"
+
+Examples:
+/filter date "Mar 1-15" - March 1 to 15
+/filter date "Mar 1 - Apr 15" - March 1 to April 15
+/filter date "March" - Entire month of March`, nil
+			}
+			dateRange := strings.Join(parts[2:], " ")
+			return handleFilterDate(prefs, chatID, dateRange, modified)
+
+		case "course":
+			if len(parts) < 3 {
+				return `❌ Please specify a course name.
+
+Usage: /filter course "Pebble Beach"
+
+Examples:
+/filter course "Pebble Beach"
+/filter course "Shadow Creek"`, nil
+			}
+			courseName := strings.Join(parts[2:], " ")
+			return handleFilterCourse(prefs, chatID, courseName, modified)
+
+		case "city":
+			if len(parts) < 3 {
+				return `❌ Please specify a city name.
+
+Usage: /filter city "Las Vegas"
+
+Examples:
+/filter city "Las Vegas"
+/filter city "San Diego"`, nil
+			}
+			cityName := strings.Join(parts[2:], " ")
+			return handleFilterCity(prefs, chatID, cityName, modified)
+
+		case "weekends":
+			return handleFilterWeekends(prefs, chatID, modified)
+
+		case "clear":
+			return handleFilterClear(prefs, chatID, modified)
+
+		case "save":
+			if len(parts) < 3 {
+				return `❌ Please specify a name for this filter.
+
+Usage: /filter save "My Weekend Events"
+
+Examples:
+/filter save "March Weekends"
+/filter save "Pebble Beach Events"`, nil
+			}
+			filterName := strings.Join(parts[2:], " ")
+			// Remove quotes if present
+			filterName = strings.Trim(filterName, "\"")
+			return handleFilterSave(prefs, chatID, filterName, modified)
+
+		case "load":
+			if len(parts) < 3 {
+				return `❌ Please specify the filter name to load.
+
+Usage: /filter load "My Weekend Events"
+
+Use /filters to see all saved filters.`, nil
+			}
+			filterName := strings.Join(parts[2:], " ")
+			// Remove quotes if present
+			filterName = strings.Trim(filterName, "\"")
+			return handleFilterLoad(prefs, chatID, filterName, modified)
+
+		case "delete":
+			if len(parts) < 3 {
+				return `❌ Please specify the filter name to delete.
+
+Usage: /filter delete "My Weekend Events"
+
+Use /filters to see all saved filters.`, nil
+			}
+			filterName := strings.Join(parts[2:], " ")
+			// Remove quotes if present
+			filterName = strings.Trim(filterName, "\"")
+			return handleFilterDelete(prefs, chatID, filterName, modified)
+
+		default:
+			return `❌ Unknown filter subcommand.
+
+Available subcommands:
+• /filter date "Mar 1-15" - Set date range
+• /filter course "Pebble Beach" - Filter by course
+• /filter city "Las Vegas" - Filter by city
+• /filter weekends - Toggle weekends-only
+• /filter save "name" - Save current filter
+• /filter load "name" - Load saved filter
+• /filter delete "name" - Delete saved filter
+• /filter clear - Remove active filter
+• /filter - Show current filter status
+
+Use /filters to list all saved filters.`, nil
+		}
+
+	case "/filters":
+		return handleFiltersList(prefs, chatID)
+
 	default:
 		return fmt.Sprintf("Unknown command: %s\n\nUse /help to see available commands.", command), nil
 	}
@@ -1107,6 +1273,8 @@ I help you track VGA Golf events in your favorite states!
 /my-events - View your tracked events ⭐
 /note - Add a note to an event 📝
 /notes - List all events with notes 📋
+/filter - Filter events (date, course, city, weekends) 🔍
+/filters - List all saved filters 📋
 /reminders - Configure event reminders 🔔
 /notify-removals - Toggle removal notifications ⚠️
 /stats - View your engagement statistics 📊
@@ -1121,6 +1289,7 @@ I help you track VGA Golf events in your favorite states!
 /list - Show your current subscriptions
 /check - Trigger an immediate check (experimental)
 /help - Show this help message
+/help &lt;command&gt; - Get detailed help for any command
 
 <b>Event Tracking:</b>
 Mark events with status buttons:
@@ -1167,6 +1336,649 @@ Created by Paul Frederiksen
 Open source at github.com/pfrederiksen/vga-events`, AllStatesCode)
 }
 
+// getCommandHelp returns detailed help for a specific command
+func getCommandHelp(cmdName string) string {
+	switch cmdName {
+	case "subscribe":
+		return `📥 <b>/subscribe - Subscribe to State Events</b>
+
+<b>Description:</b>
+Subscribe to VGA events in specific states. You'll receive notifications whenever new events are posted.
+
+<b>Usage:</b>
+/subscribe - Show state selection buttons
+/subscribe &lt;STATE&gt; - Subscribe to a specific state
+
+<b>Examples:</b>
+/subscribe NV - Subscribe to Nevada
+/subscribe CA - Subscribe to California
+/subscribe ALL - Subscribe to all states
+
+<b>State Codes:</b>
+Use 2-letter state codes like NV, CA, TX, AZ, etc.
+Use ALL to get events from all states.
+
+<b>Related Commands:</b>
+/unsubscribe - Remove state subscriptions
+/list - View your current subscriptions
+/manage - Manage subscriptions with buttons`
+
+	case "unsubscribe":
+		return `📤 <b>/unsubscribe - Unsubscribe from States</b>
+
+<b>Description:</b>
+Remove state subscriptions. You'll stop receiving notifications for that state.
+
+<b>Usage:</b>
+/unsubscribe &lt;STATE&gt; - Unsubscribe from a specific state
+/unsubscribe all - Remove all subscriptions (requires confirmation)
+
+<b>Examples:</b>
+/unsubscribe NV - Stop Nevada notifications
+/unsubscribe all - Remove all state subscriptions
+
+<b>Related Commands:</b>
+/subscribe - Add new state subscriptions
+/list - View current subscriptions
+/manage - Manage subscriptions with buttons`
+
+	case "search":
+		return `🔍 <b>/search - Search for Events</b>
+
+<b>Description:</b>
+Search across all your subscribed states for events matching a keyword. Searches event titles, cities, and state names.
+
+<b>Usage:</b>
+/search &lt;keyword&gt; - Search for events
+
+<b>Examples:</b>
+/search "Pine Valley" - Find Pine Valley events
+/search Championship - Find championship events
+/search Las Vegas - Find events in Las Vegas
+/search NV - Find all Nevada events
+
+<b>Tips:</b>
+• Search is case-insensitive
+• Use quotes for multi-word exact phrases
+• Only searches your subscribed states
+• Results show course info if available
+
+<b>Related Commands:</b>
+/near - Find events near a specific city
+/events - View all upcoming events`
+
+	case "near":
+		return `📍 <b>/near - Find Events Near a City</b>
+
+<b>Description:</b>
+Find VGA events happening near a specific city. Uses fuzzy matching to find events in the same city or nearby locations.
+
+<b>Usage:</b>
+/near &lt;city&gt; - Find events near a city
+
+<b>Examples:</b>
+/near Las Vegas - Events near Las Vegas
+/near "San Diego" - Events near San Diego
+/near Phoenix - Events near Phoenix
+
+<b>Tips:</b>
+• Searches your subscribed states only
+• City names are case-insensitive
+• Use quotes for multi-word city names
+• Shows events in matching cities
+
+<b>Related Commands:</b>
+/search - Search by keyword
+/events - View all events`
+
+	case "note":
+		return `📝 <b>/note - Add Notes to Events</b>
+
+<b>Description:</b>
+Add personal notes to events. Notes appear in notifications, reminders, and event details. Maximum 500 characters.
+
+<b>Usage:</b>
+/note &lt;event_id&gt; &lt;text&gt; - Add or update a note
+/note &lt;event_id&gt; clear - Remove a note
+
+<b>Examples:</b>
+/note abc123 Bringing guest clubs
+/note abc123 Playing with John and Sarah
+/note abc123 clear - Remove the note
+
+<b>Tips:</b>
+• Notes are private (only you see them)
+• Appear in event notifications and reminders
+• Update anytime by sending new note
+• Max 500 characters per note
+
+<b>Related Commands:</b>
+/notes - List all events with notes
+/my-events - View tracked events (shows notes)`
+
+	case "notes":
+		return `📋 <b>/notes - List Events with Notes</b>
+
+<b>Description:</b>
+View all events where you've added personal notes. Shows event details along with your notes.
+
+<b>Usage:</b>
+/notes - List all events with notes
+
+<b>Tips:</b>
+• Only shows events you've added notes to
+• Includes event status (⭐ Interested, ✅ Registered, etc.)
+• Click event for more details
+• Use /note to add or edit notes
+
+<b>Related Commands:</b>
+/note - Add or edit event notes
+/my-events - View all tracked events`
+
+	case "events":
+		return `📅 <b>/events - View All Events</b>
+
+<b>Description:</b>
+View all upcoming VGA events in your subscribed states. Shows event details and course information if available.
+
+<b>Usage:</b>
+/events - List all upcoming events
+
+<b>Tips:</b>
+• Only shows events in subscribed states
+• Click any event to mark status (⭐ Interested, ✅ Registered, etc.)
+• Events sorted by date
+• Includes golf course details when available
+
+<b>Related Commands:</b>
+/my-events - View only tracked events
+/search - Search for specific events
+/subscribe - Add more states`
+
+	case "my-events":
+		return `⭐ <b>/my-events - View Your Tracked Events</b>
+
+<b>Description:</b>
+View events you've marked with a status: ⭐ Interested, ✅ Registered, 🤔 Maybe. Excludes events marked as ❌ Skip.
+
+<b>Usage:</b>
+/my-events - List your tracked events
+
+<b>Event Statuses:</b>
+• ⭐ Interested - Events you want to attend
+• ✅ Registered - Events you've signed up for
+• 🤔 Maybe - Events you're considering
+• ❌ Skip - Events you're not interested in (hidden)
+
+<b>Tips:</b>
+• Shows your personal notes if added
+• Get reminders for ⭐ and ✅ events
+• Friends can see your ✅ events (if sharing enabled)
+• Click event to change status
+
+<b>Related Commands:</b>
+/events - View all events
+/note - Add notes to events
+/reminders - Configure reminder timing`
+
+	case "reminders":
+		return `🔔 <b>/reminders - Configure Event Reminders</b>
+
+<b>Description:</b>
+Set when you want to be reminded about events marked ⭐ Interested or ✅ Registered. Reminders sent daily at 9 AM UTC.
+
+<b>Usage:</b>
+/reminders - Show reminder configuration menu
+
+<b>Options:</b>
+• 1 day before event
+• 3 days before event
+• 1 week before event
+• 2 weeks before event
+
+<b>Tips:</b>
+• Only reminded about ⭐ and ✅ events
+• Reminders include your notes
+• Can disable reminders entirely
+• Configure via interactive buttons
+
+<b>Related Commands:</b>
+/my-events - View tracked events
+/note - Add notes to events
+/settings - Configure other preferences`
+
+	case "notify-removals":
+		return `⚠️ <b>/notify-removals - Toggle Removal Notifications</b>
+
+<b>Description:</b>
+Get notified when events are removed or cancelled from the VGA website. Two priority levels based on your engagement.
+
+<b>Usage:</b>
+/notify-removals on - Enable notifications
+/notify-removals off - Disable notifications
+/notify-removals - Show current setting
+
+<b>Notification Levels:</b>
+⚠️ <b>High Priority:</b> Events you're registered for (✅) or tracking (⭐)
+ℹ️ <b>Low Priority:</b> Events in your subscribed states
+
+<b>Tips:</b>
+• Includes your notes if you had any
+• Removal notifications sent immediately
+• Default: ON
+• Removed events kept for 30 days
+
+<b>Related Commands:</b>
+/my-events - View tracked events
+/settings - Other notification preferences`
+
+	case "stats":
+		return `📊 <b>/stats - View Engagement Statistics</b>
+
+<b>Description:</b>
+View your VGA Events Bot usage statistics and engagement metrics.
+
+<b>Usage:</b>
+/stats - Show this week's stats (default)
+/stats week - This week's statistics
+/stats month - This month's statistics
+/stats all - All-time statistics
+
+<b>Metrics Tracked:</b>
+• Events tracked (⭐ ✅ 🤔)
+• Events skipped (❌)
+• Notes added
+• Searches performed
+• Commands used
+
+<b>Tips:</b>
+• Stats reset weekly (Sundays at 11:59 PM UTC)
+• Historical data saved for trends
+• Weekly stats archived automatically
+
+<b>Related Commands:</b>
+/my-events - View tracked events
+/notes - View events with notes`
+
+	case "bulk":
+		return `🔧 <b>/bulk - Bulk Operations</b>
+
+<b>Description:</b>
+Perform actions on multiple events at once. Useful for managing, tracking, or organizing events in bulk.
+
+<b>Usage:</b>
+/bulk - Show bulk actions menu (interactive)
+/bulk register &lt;event_ids&gt; - Mark multiple events as registered
+/bulk note &lt;event_ids&gt; &lt;note_text&gt; - Add same note to multiple events
+/bulk status &lt;status&gt; &lt;event_ids&gt; - Set status for multiple events
+
+<b>Event ID Formats:</b>
+• Space-separated: /bulk register abc123 def456 ghi789
+• Comma-separated: /bulk register abc123,def456,ghi789
+
+<b>Examples:</b>
+/bulk register abc123 def456 - Mark two events as registered
+/bulk note abc123,def456 "Must play early" - Add note to two events
+/bulk status interested abc123,def456 - Mark two events as interested
+/bulk status skip abc123 def456 ghi789 - Skip three events
+
+<b>Valid Statuses:</b>
+• interested - ⭐ Mark as interested
+• registered - ✅ Mark as registered
+• maybe - 🤔 Mark as maybe
+• skip - ❌ Mark to skip
+
+<b>Interactive Actions (via /bulk menu):</b>
+• <b>Clear Skipped Events</b> - Remove all ❌ Skip status marks
+• <b>Export Registered Events</b> - Download calendar file (.ics) of all ✅ Registered events
+
+<b>Tips:</b>
+• Operations are immediate and show success count
+• Event IDs can be found in event notifications
+• Use comma or space to separate multiple IDs
+• Note text limited to 500 characters
+
+<b>Related Commands:</b>
+/my-events - View tracked events
+/note - Add note to single event
+/export-calendar - Export all events`
+
+	case "export-calendar":
+		return `📅 <b>/export-calendar - Export to Calendar</b>
+
+<b>Description:</b>
+Download VGA events as an iCalendar (.ics) file compatible with Google Calendar, Apple Calendar, Outlook, etc.
+
+<b>Usage:</b>
+/export-calendar - Export all subscribed events
+/export-calendar &lt;STATE&gt; - Export events from specific state
+
+<b>Examples:</b>
+/export-calendar - All events from subscribed states
+/export-calendar NV - Only Nevada events
+/export-calendar CA - Only California events
+
+<b>Tips:</b>
+• Import .ics file into any calendar app
+• Events include full details and location
+• Re-export anytime to get updates
+• File sent directly in Telegram
+
+<b>Related Commands:</b>
+/bulk - Export only registered events
+/events - View events before exporting`
+
+	case "invite":
+		return `👥 <b>/invite - Get Friend Invite Code</b>
+
+<b>Description:</b>
+Generate your personal invite code to share with golf buddies. Friends who join can see which events you're registered for.
+
+<b>Usage:</b>
+/invite - Show your invite code
+
+<b>How It Works:</b>
+1. You send /invite to get your code
+2. Share code with your friend
+3. They send /join &lt;your_code&gt;
+4. You're now connected!
+
+<b>Privacy:</b>
+• Friends see events you mark as ✅ Registered
+• Requires both users to enable sharing in /settings
+• Only shows registered events (not ⭐ or 🤔)
+• You can disable sharing anytime
+
+<b>Related Commands:</b>
+/join - Join using a friend's code
+/friends - View your friend list
+/settings - Enable/disable event sharing`
+
+	case "friends":
+		return `👥 <b>/friends - View Friend List</b>
+
+<b>Description:</b>
+See your list of connected golf buddies. When both you and a friend enable sharing, you'll see events they've registered for.
+
+<b>Usage:</b>
+/friends - Show your friend list
+
+<b>Tips:</b>
+• Shows who can see your registered events
+• Sharing must be enabled by both users
+• Use /settings to control sharing
+• Friends see "👥 Your friends: @username" on shared events
+
+<b>Related Commands:</b>
+/invite - Get your invite code
+/join - Add a friend
+/settings - Enable/disable sharing`
+
+	case "join":
+		return `👥 <b>/join - Add a Friend</b>
+
+<b>Description:</b>
+Connect with a golf buddy using their invite code. See which events they're registered for (when both have sharing enabled).
+
+<b>Usage:</b>
+/join &lt;invite_code&gt; - Add friend using their code
+
+<b>Examples:</b>
+/join ABC123XYZ - Connect with friend
+
+<b>Steps:</b>
+1. Get friend's invite code (they use /invite)
+2. Send /join &lt;their_code&gt;
+3. Both enable sharing in /settings
+4. See each other's registered events!
+
+<b>Privacy:</b>
+• Sharing is optional (configure in /settings)
+• Only ✅ Registered events are shared
+• Either user can disable sharing anytime
+
+<b>Related Commands:</b>
+/invite - Get your invite code
+/friends - View connected friends
+/settings - Enable/disable sharing`
+
+	case "list":
+		return `📋 <b>/list - Show Subscriptions</b>
+
+<b>Description:</b>
+Display all states you're currently subscribed to. You receive event notifications from these states.
+
+<b>Usage:</b>
+/list - Show your subscribed states
+
+<b>Tips:</b>
+• Shows state codes and full names
+• Add states with /subscribe
+• Remove states with /unsubscribe
+• Use /manage for button-based management
+
+<b>Related Commands:</b>
+/subscribe - Add more states
+/unsubscribe - Remove states
+/manage - Manage with buttons`
+
+	case "manage":
+		return `⚙️ <b>/manage - Manage Subscriptions</b>
+
+<b>Description:</b>
+Interactive menu to manage your state subscriptions using buttons. Easier than typing commands.
+
+<b>Usage:</b>
+/manage - Show subscription management menu
+
+<b>Features:</b>
+• View current subscriptions
+• Add states with one tap
+• Remove states with confirmation
+• See all available states
+
+<b>Tips:</b>
+• More user-friendly than typing commands
+• Shows state names, not just codes
+• Confirms before removing states
+• Same as /subscribe and /unsubscribe
+
+<b>Related Commands:</b>
+/subscribe - Subscribe via command
+/unsubscribe - Unsubscribe via command
+/list - View current subscriptions`
+
+	case "settings":
+		return `⚙️ <b>/settings - Notification Preferences</b>
+
+<b>Description:</b>
+Configure how and when you receive event notifications. Control digest mode, friend sharing, and more.
+
+<b>Usage:</b>
+/settings - Show settings menu
+
+<b>Options:</b>
+• <b>Notification Mode:</b> Immediate, Daily Digest, or Weekly Digest
+• <b>Friend Sharing:</b> Let friends see your registered events
+• <b>Event Reminders:</b> Enable/disable reminder notifications
+• <b>Removal Notifications:</b> Get notified about cancelled events
+
+<b>Notification Modes:</b>
+• <b>Immediate</b> - Instant notifications (default)
+• <b>Daily Digest</b> - One summary at 9 AM UTC
+• <b>Weekly Digest</b> - Monday summary at 9 AM UTC
+
+<b>Related Commands:</b>
+/reminders - Configure reminder timing
+/notify-removals - Toggle removal notifications
+/friends - View sharing status`
+
+	case "menu":
+		return `🎯 <b>/menu - Quick Actions Menu</b>
+
+<b>Description:</b>
+Interactive menu with quick access to the most common actions. Great starting point if you're not sure what to do.
+
+<b>Usage:</b>
+/menu - Show quick actions menu
+
+<b>Available Actions:</b>
+• View My Events
+• View All Events
+• Search Events
+• Manage Subscriptions
+• Configure Settings
+• View Statistics
+• Get Help
+
+<b>Tips:</b>
+• Fastest way to navigate the bot
+• No need to remember commands
+• All major features accessible
+• Use anytime you need quick access
+
+<b>Related Commands:</b>
+/help - Show all available commands`
+
+	case "check":
+		return `🔄 <b>/check - Manual Event Check</b>
+
+<b>Description:</b>
+Trigger an immediate check for new events instead of waiting for the hourly automatic check. Experimental feature.
+
+<b>Usage:</b>
+/check - Check for new events now
+
+<b>How It Works:</b>
+• Triggers GitHub Actions workflow
+• Checks VGA website for new events
+• Sends notifications if new events found
+• Usually completes within 1-2 minutes
+
+<b>Notes:</b>
+• This is an experimental feature
+• Automatic checks run every hour
+• Rate limits may apply
+• No need to use frequently
+
+<b>Related Commands:</b>
+/events - View current events
+/my-events - View tracked events`
+
+	case "start":
+		return `🚀 <b>/start - Get Started</b>
+
+<b>Description:</b>
+Welcome message and introduction to the bot. Shows the same information as /help.
+
+<b>Usage:</b>
+/start - Show welcome message
+
+<b>First Steps:</b>
+1. Use /subscribe to choose states
+2. Browse events with /events
+3. Mark events you're interested in
+4. Get notifications when new events post
+
+<b>Related Commands:</b>
+/help - Show all commands
+/subscribe - Subscribe to states
+/menu - Quick actions menu`
+
+	case "filter":
+		return `🔍 <b>/filter - Event Filtering</b>
+
+<b>Description:</b>
+Create custom filters to narrow down events by date, course, city, or weekends only. Save filters as presets for quick reuse.
+
+<b>Usage:</b>
+/filter - Show current filter status
+/filter date &lt;range&gt; - Filter by date range
+/filter course &lt;name&gt; - Filter by course name
+/filter city &lt;name&gt; - Filter by city
+/filter weekends - Toggle weekends-only
+/filter save &lt;name&gt; - Save current filter
+/filter load &lt;name&gt; - Load saved filter
+/filter delete &lt;name&gt; - Delete saved filter
+/filter clear - Remove active filter
+
+<b>Date Range Examples:</b>
+/filter date "Mar 1-15" - March 1 to 15
+/filter date "March 1 - April 15" - March 1 to April 15
+/filter date "March" - Entire month of March
+
+<b>Course/City Examples:</b>
+/filter course "Pebble Beach" - Events at Pebble Beach
+/filter city "Las Vegas" - Events in Las Vegas
+
+<b>Combining Filters:</b>
+1. /filter date "Mar 1-15" - Set date range
+2. /filter weekends - Add weekends-only
+3. /filter course "Pebble" - Add course filter
+4. /filter save "March Pebble Weekends" - Save combination
+
+<b>Tips:</b>
+• Filters apply to your subscribed states
+• Combine multiple criteria (date + course + weekends)
+• Save useful filters as presets
+• Active filter applies to /events and /search
+• Use /filter to see current active filter
+
+<b>Related Commands:</b>
+/filters - List all saved filters
+/events - View filtered events
+/search - Search with active filter applied`
+
+	case "filters":
+		return `📋 <b>/filters - List Saved Filters</b>
+
+<b>Description:</b>
+View all your saved filter presets. Shows filter criteria and which one is currently active.
+
+<b>Usage:</b>
+/filters - List all saved filters
+
+<b>Filter Actions:</b>
+• /filter load "name" - Activate a saved filter
+• /filter delete "name" - Remove a saved filter
+• /filter - View current active filter
+
+<b>Example Workflow:</b>
+1. Create a filter: /filter date "March"
+2. Add criteria: /filter weekends
+3. Save it: /filter save "March Weekends"
+4. Later, load it: /filter load "March Weekends"
+
+<b>Tips:</b>
+• Saved filters persist across sessions
+• Quick way to reuse common filter combinations
+• Active filter shown with ✅ checkmark
+• Delete unused filters to keep list clean
+
+<b>Related Commands:</b>
+/filter - Create and manage filters
+/events - View events with active filter`
+
+	default:
+		return fmt.Sprintf(`❓ <b>Unknown Command: /%s</b>
+
+No help available for this command.
+
+Use /help to see all available commands.
+
+<b>Popular Commands:</b>
+/subscribe - Subscribe to states
+/events - View upcoming events
+/search - Search for events
+/my-events - View tracked events
+/settings - Configure preferences
+
+<b>Get Detailed Help:</b>
+/help subscribe - Help for /subscribe
+/help search - Help for /search
+etc.`, cmdName)
+	}
+}
 func handleSubscribe(prefs preferences.Preferences, chatID, state string, modified *bool, botToken string, dryRun bool) (string, []*event.Event) {
 	state = strings.ToUpper(strings.TrimSpace(state))
 
@@ -2151,12 +2963,27 @@ Use /subscribe to start receiving events!`, nil
 		filteredEvents = upcomingEvents
 	}
 
+	// Apply user's active filter if any
+	filteredEvents = user.ApplyFiltersToEvents(filteredEvents)
+
+	// Build filter status message
+	filterStatus := ""
+	if user.GetActiveFilter() != nil {
+		filterStatus = fmt.Sprintf("\n\n🔍 <b>Active Filter:</b> %s", user.GetActiveFilter().String())
+	}
+
 	if len(filteredEvents) == 0 {
-		return fmt.Sprintf(`📅 <b>All Events</b>
+		noEventsMsg := fmt.Sprintf(`📅 <b>All Events</b>
 
-No events found for your subscribed states: %s
+No events found for your subscribed states: %s%s
 
-Check back later or subscribe to more states with /subscribe`, strings.Join(states, ", ")), nil
+Check back later or subscribe to more states with /subscribe`, strings.Join(states, ", "), filterStatus)
+
+		if user.GetActiveFilter() != nil {
+			noEventsMsg += "\n\nTry /filter clear to remove active filter."
+		}
+
+		return noEventsMsg, nil
 	}
 
 	// Sort by date (soonest first)
@@ -2178,9 +3005,9 @@ Check back later or subscribe to more states with /subscribe`, strings.Join(stat
 		// Send header message
 		headerMsg := fmt.Sprintf(`📅 <b>All Events</b>
 
-Found %d event(s) for %s
+Found %d event(s) for %s%s
 
-Showing %d event(s), sorted by date:`, len(filteredEvents), strings.Join(states, ", "), len(eventsToSend))
+Showing %d event(s), sorted by date:`, len(filteredEvents), strings.Join(states, ", "), filterStatus, len(eventsToSend))
 
 		if err := client.SendMessage(headerMsg); err != nil {
 			fmt.Fprintf(os.Stderr, "Error sending header: %v\n", err)
@@ -2609,7 +3436,7 @@ func getUpdatesWithTimeout(botToken string, offset int, timeoutSeconds int) ([]U
 // sendDigest sends a digest message to a specific user
 func sendDigest(botToken, chatID, digestFile, digestType string) {
 	// Read digest events from file
-	f, err := os.Open(digestFile)
+	f, err := os.Open(digestFile) // #nosec G304 - File path from CLI flag, user controlled
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening digest file: %v\n", err)
 		os.Exit(1)
@@ -2864,4 +3691,308 @@ When events are removed or cancelled from the VGA website, you can be notified.
 	default:
 		return "❌ Invalid option. Use:\n• <code>/notify-removals on</code>\n• <code>/notify-removals off</code>", nil
 	}
+}
+
+// Filter command handlers
+
+// handleFilterStatus shows the current active filter
+func handleFilterStatus(prefs preferences.Preferences, chatID string) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+	activeFilter := user.GetActiveFilter()
+
+	if activeFilter == nil {
+		return "🔍 <b>Event Filters</b>\n\nNo active filter.\n\nUse /filter commands to add filters:\n• /filter date \"Mar 1-15\"\n• /filter course \"Pebble Beach\"\n• /filter city \"Las Vegas\"\n• /filter weekends\n\nOr use /filters to see saved filters.", nil
+	}
+
+	filterName := user.ActiveFilter
+	description := activeFilter.String()
+
+	return fmt.Sprintf("🔍 <b>Active Filter</b>\n\n<b>Name:</b> %s\n<b>Criteria:</b> %s\n\nUse /filter clear to remove this filter.", filterName, description), nil
+}
+
+// handleFilterDate sets a date range filter
+func handleFilterDate(prefs preferences.Preferences, chatID, dateRange string, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+
+	// Parse date range
+	from, to, err := filter.ParseDateRange(dateRange)
+	if err != nil {
+		return fmt.Sprintf("❌ Invalid date range: %s\n\nExamples:\n• /filter date \"Mar 1-15\"\n• /filter date \"March 1 - April 15\"\n• /filter date \"March\"", err.Error()), nil
+	}
+
+	// Get or create current filter
+	activeFilter := user.GetActiveFilter()
+	if activeFilter == nil {
+		activeFilter = filter.NewFilter()
+	} else {
+		// Clone to avoid modifying saved preset
+		activeFilter = activeFilter.Clone()
+	}
+
+	// Update date range
+	activeFilter.DateFrom = from
+	activeFilter.DateTo = to
+
+	// Save as temporary active filter
+	user.SaveFilter("_temp_active", activeFilter)
+	user.SetActiveFilter("_temp_active")
+	*modified = true
+
+	return fmt.Sprintf("✅ Date filter set: <b>%s to %s</b>\n\nActive filter:\n%s\n\nUse /filter save \"name\" to save this filter.", from.Format("Jan 2, 2006"), to.Format("Jan 2, 2006"), activeFilter.String()), nil
+}
+
+// handleFilterCourse adds a course name filter
+// nolint:dupl // Similar logic to handleFilterCity - can be refactored later
+func handleFilterCourse(prefs preferences.Preferences, chatID, courseName string, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+
+	// Validate input
+	courseName = strings.TrimSpace(courseName)
+	// Remove quotes if present
+	courseName = strings.Trim(courseName, "\"")
+
+	if courseName == "" {
+		return "❌ Course name cannot be empty.", nil
+	}
+
+	// Get or create current filter
+	activeFilter := user.GetActiveFilter()
+	if activeFilter == nil {
+		activeFilter = filter.NewFilter()
+	} else {
+		// Clone to avoid modifying saved preset
+		activeFilter = activeFilter.Clone()
+	}
+
+	// Add course to filter (if not already present)
+	found := false
+	for _, c := range activeFilter.Courses {
+		if strings.EqualFold(c, courseName) {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		activeFilter.Courses = append(activeFilter.Courses, courseName)
+	}
+
+	// Save as temporary active filter
+	user.SaveFilter("_temp_active", activeFilter)
+	user.SetActiveFilter("_temp_active")
+	*modified = true
+
+	return fmt.Sprintf("✅ Course filter added: <b>%s</b>\n\nActive filter:\n%s\n\nUse /filter save \"name\" to save this filter.", courseName, activeFilter.String()), nil
+}
+
+// handleFilterCity adds a city name filter
+// nolint:dupl // Similar logic to handleFilterCourse - can be refactored later
+func handleFilterCity(prefs preferences.Preferences, chatID, cityName string, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+
+	// Validate input
+	cityName = strings.TrimSpace(cityName)
+	// Remove quotes if present
+	cityName = strings.Trim(cityName, "\"")
+
+	if cityName == "" {
+		return "❌ City name cannot be empty.", nil
+	}
+
+	// Get or create current filter
+	activeFilter := user.GetActiveFilter()
+	if activeFilter == nil {
+		activeFilter = filter.NewFilter()
+	} else {
+		// Clone to avoid modifying saved preset
+		activeFilter = activeFilter.Clone()
+	}
+
+	// Add city to filter (if not already present)
+	found := false
+	for _, c := range activeFilter.Cities {
+		if strings.EqualFold(c, cityName) {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		activeFilter.Cities = append(activeFilter.Cities, cityName)
+	}
+
+	// Save as temporary active filter
+	user.SaveFilter("_temp_active", activeFilter)
+	user.SetActiveFilter("_temp_active")
+	*modified = true
+
+	return fmt.Sprintf("✅ City filter added: <b>%s</b>\n\nActive filter:\n%s\n\nUse /filter save \"name\" to save this filter.", cityName, activeFilter.String()), nil
+}
+
+// handleFilterWeekends toggles weekends-only filter
+func handleFilterWeekends(prefs preferences.Preferences, chatID string, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+
+	// Get or create current filter
+	activeFilter := user.GetActiveFilter()
+	if activeFilter == nil {
+		activeFilter = filter.NewFilter()
+	} else {
+		// Clone to avoid modifying saved preset
+		activeFilter = activeFilter.Clone()
+	}
+
+	// Toggle weekends only
+	activeFilter.WeekendsOnly = !activeFilter.WeekendsOnly
+
+	// Save as temporary active filter
+	user.SaveFilter("_temp_active", activeFilter)
+	user.SetActiveFilter("_temp_active")
+	*modified = true
+
+	status := "enabled"
+	if !activeFilter.WeekendsOnly {
+		status = "disabled"
+	}
+
+	return fmt.Sprintf("✅ Weekends-only filter %s\n\nActive filter:\n%s\n\nUse /filter save \"name\" to save this filter.", status, activeFilter.String()), nil
+}
+
+// handleFilterClear removes the active filter
+func handleFilterClear(prefs preferences.Preferences, chatID string, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+
+	if user.ActiveFilter == "" {
+		return "ℹ️ No active filter to clear.", nil
+	}
+
+	user.ClearActiveFilter()
+	// Also delete the temporary filter
+	user.DeleteFilter("_temp_active")
+	*modified = true
+
+	return "✅ Active filter cleared.\n\nAll events will now be shown based on your state subscriptions.", nil
+}
+
+// handleFilterSave saves the current filter as a named preset
+func handleFilterSave(prefs preferences.Preferences, chatID, filterName string, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+
+	// Validate filter name
+	filterName = strings.TrimSpace(filterName)
+	if filterName == "" {
+		return "❌ Filter name cannot be empty.", nil
+	}
+
+	if len(filterName) > 50 {
+		return "❌ Filter name is too long (max 50 characters).", nil
+	}
+
+	// Don't allow saving with reserved name
+	if filterName == "_temp_active" {
+		return "❌ This filter name is reserved. Please choose a different name.", nil
+	}
+
+	// Get current active filter
+	activeFilter := user.GetActiveFilter()
+	if activeFilter == nil {
+		return "❌ No active filter to save.\n\nCreate a filter first using:\n• /filter date \"Mar 1-15\"\n• /filter course \"Pebble Beach\"\n• /filter city \"Las Vegas\"\n• /filter weekends", nil
+	}
+
+	// Save the filter
+	user.SaveFilter(filterName, activeFilter)
+	user.SetActiveFilter(filterName)
+	*modified = true
+
+	return fmt.Sprintf("✅ Filter saved as: <b>%s</b>\n\nFilter criteria:\n%s\n\nUse /filters to see all saved filters.", filterName, activeFilter.String()), nil
+}
+
+// handleFilterLoad loads a saved filter preset
+func handleFilterLoad(prefs preferences.Preferences, chatID, filterName string, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+
+	// Validate filter name
+	filterName = strings.TrimSpace(filterName)
+	if filterName == "" {
+		return "❌ Filter name cannot be empty.", nil
+	}
+
+	// Load the filter
+	savedFilter := user.GetFilter(filterName)
+	if savedFilter == nil {
+		return fmt.Sprintf("❌ Filter not found: <b>%s</b>\n\nUse /filters to see all saved filters.", filterName), nil
+	}
+
+	// Set as active
+	user.SetActiveFilter(filterName)
+	*modified = true
+
+	return fmt.Sprintf("✅ Filter loaded: <b>%s</b>\n\nFilter criteria:\n%s", filterName, savedFilter.String()), nil
+}
+
+// handleFilterDelete deletes a saved filter preset
+func handleFilterDelete(prefs preferences.Preferences, chatID, filterName string, modified *bool) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+
+	// Validate filter name
+	filterName = strings.TrimSpace(filterName)
+	if filterName == "" {
+		return "❌ Filter name cannot be empty.", nil
+	}
+
+	// Delete the filter
+	deleted := user.DeleteFilter(filterName)
+	if !deleted {
+		return fmt.Sprintf("❌ Filter not found: <b>%s</b>\n\nUse /filters to see all saved filters.", filterName), nil
+	}
+
+	*modified = true
+
+	return fmt.Sprintf("✅ Filter deleted: <b>%s</b>", filterName), nil
+}
+
+// handleFiltersList lists all saved filters
+func handleFiltersList(prefs preferences.Preferences, chatID string) (string, []*event.Event) {
+	user := prefs.GetUser(chatID)
+
+	filterNames := user.GetAllFilterNames()
+	if len(filterNames) == 0 {
+		return "📋 <b>Saved Filters</b>\n\nYou don't have any saved filters yet.\n\nCreate a filter and save it:\n1. /filter date \"Mar 1-15\"\n2. /filter course \"Pebble Beach\"\n3. /filter save \"My Filter\"", nil
+	}
+
+	var msg strings.Builder
+	msg.WriteString("📋 <b>Saved Filters</b>\n\n")
+
+	// Filter out temporary filter
+	displayFilters := []string{}
+	for _, name := range filterNames {
+		if name != "_temp_active" {
+			displayFilters = append(displayFilters, name)
+		}
+	}
+
+	if len(displayFilters) == 0 {
+		return "📋 <b>Saved Filters</b>\n\nYou don't have any saved filters yet.\n\nCreate a filter and save it:\n1. /filter date \"Mar 1-15\"\n2. /filter course \"Pebble Beach\"\n3. /filter save \"My Filter\"", nil
+	}
+
+	for i, name := range displayFilters {
+		filterObj := user.GetFilter(name)
+		active := ""
+		if user.ActiveFilter == name {
+			active = " ✅ (active)"
+		}
+
+		msg.WriteString(fmt.Sprintf("%d. <b>%s</b>%s\n", i+1, name, active))
+		if filterObj != nil {
+			msg.WriteString(fmt.Sprintf("   %s\n", filterObj.String()))
+		}
+		msg.WriteString("\n")
+	}
+
+	msg.WriteString("\n<b>Commands:</b>\n")
+	msg.WriteString("• /filter load \"name\" - Load a filter\n")
+	msg.WriteString("• /filter delete \"name\" - Delete a filter\n")
+	msg.WriteString("• /filter clear - Clear active filter")
+
+	return msg.String(), nil
 }

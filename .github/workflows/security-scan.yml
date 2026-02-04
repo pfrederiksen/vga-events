@@ -1,0 +1,206 @@
+name: Security Scanner
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Run weekly on Mondays at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  gosec:
+    name: Gosec Security Scanner
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Run Gosec Security Scanner
+        uses: securego/gosec@master
+        with:
+          args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gosec-results.sarif
+
+      - name: Run Gosec for human-readable output
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -fmt=json -out=gosec-report.json ./... || true
+          gosec ./... 2>&1 | tee gosec-output.txt || true
+
+      - name: Generate security report
+        run: |
+          echo "# Security Scan Report" > security-report.md
+          echo "" >> security-report.md
+          echo "Generated: $(date -u)" >> security-report.md
+          echo "" >> security-report.md
+
+          # Count issues by severity
+          if [ -f gosec-report.json ]; then
+            HIGH=$(jq '[.Issues[] | select(.severity == "HIGH")] | length' gosec-report.json)
+            MEDIUM=$(jq '[.Issues[] | select(.severity == "MEDIUM")] | length' gosec-report.json)
+            LOW=$(jq '[.Issues[] | select(.severity == "LOW")] | length' gosec-report.json)
+
+            echo "## Summary" >> security-report.md
+            echo "" >> security-report.md
+            echo "- 🔴 High Severity: $HIGH" >> security-report.md
+            echo "- 🟡 Medium Severity: $MEDIUM" >> security-report.md
+            echo "- 🟢 Low Severity: $LOW" >> security-report.md
+            echo "" >> security-report.md
+
+            if [ "$HIGH" -gt 0 ]; then
+              echo "## ⚠️ High Severity Issues" >> security-report.md
+              echo "" >> security-report.md
+              echo '```' >> security-report.md
+              jq -r '.Issues[] | select(.severity == "HIGH") | "\(.file):\(.line) - \(.details)"' gosec-report.json >> security-report.md
+              echo '```' >> security-report.md
+              echo "" >> security-report.md
+            fi
+
+            if [ "$MEDIUM" -gt 0 ]; then
+              echo "## Medium Severity Issues" >> security-report.md
+              echo "" >> security-report.md
+              echo '```' >> security-report.md
+              jq -r '.Issues[] | select(.severity == "MEDIUM") | "\(.file):\(.line) - \(.details)"' gosec-report.json | head -10 >> security-report.md
+              echo '```' >> security-report.md
+              echo "" >> security-report.md
+            fi
+          else
+            echo "✅ No security issues found by Gosec" >> security-report.md
+          fi
+
+      - name: Check dependencies for vulnerabilities
+        run: |
+          echo "" >> security-report.md
+          echo "## Dependency Vulnerabilities" >> security-report.md
+          echo "" >> security-report.md
+
+          # Run govulncheck
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          if govulncheck ./... > vuln-output.txt 2>&1; then
+            echo "✅ No known vulnerabilities in dependencies" >> security-report.md
+          else
+            echo "⚠️ **Vulnerabilities found:**" >> security-report.md
+            echo "" >> security-report.md
+            echo '```' >> security-report.md
+            cat vuln-output.txt >> security-report.md
+            echo '```' >> security-report.md
+          fi
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('security-report.md', 'utf8');
+
+            // Find existing security comment
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.data.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Security Scan Report')
+            );
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: report
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: report
+              });
+            }
+
+      - name: Fail on high severity issues
+        run: |
+          if [ -f gosec-report.json ]; then
+            HIGH=$(jq '[.Issues[] | select(.severity == "HIGH")] | length' gosec-report.json)
+            if [ "$HIGH" -gt 0 ]; then
+              echo "❌ Found $HIGH high severity security issues"
+              echo "Please fix high severity issues before merging"
+              exit 1
+            fi
+          fi
+          echo "✅ No high severity security issues found"
+
+  secret-scan:
+    name: Secret Scanner
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          deny-licenses: GPL-2.0, GPL-3.0
+
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: go
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3

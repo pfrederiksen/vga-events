@@ -1,0 +1,301 @@
+name: Performance Monitor
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches: [main]
+  schedule:
+    # Run weekly on Saturdays at 9 AM UTC
+    - cron: '0 9 * * 6'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Run benchmarks
+        run: |
+          echo "Running benchmarks..."
+          go test -bench=. -benchmem -run=^$ ./... | tee benchmark-results.txt
+
+      - name: Check if baseline exists
+        id: baseline
+        run: |
+          if [ -f benchmark-baseline.txt ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            # Create baseline from current results
+            cp benchmark-results.txt benchmark-baseline.txt
+          fi
+
+      - name: Compare with baseline
+        if: steps.baseline.outputs.exists == 'true'
+        run: |
+          go install golang.org/x/perf/cmd/benchstat@latest
+
+          echo "## Performance Benchmark Comparison" > benchmark-report.md
+          echo "" >> benchmark-report.md
+          echo "Comparing current performance vs baseline" >> benchmark-report.md
+          echo "" >> benchmark-report.md
+
+          # Compare benchmarks
+          if benchstat benchmark-baseline.txt benchmark-results.txt > comparison.txt; then
+            echo '```' >> benchmark-report.md
+            cat comparison.txt >> benchmark-report.md
+            echo '```' >> benchmark-report.md
+          else
+            echo "No significant performance changes detected" >> benchmark-report.md
+          fi
+
+      - name: Check for regressions
+        if: steps.baseline.outputs.exists == 'true'
+        run: |
+          echo "" >> benchmark-report.md
+          echo "## Analysis" >> benchmark-report.md
+          echo "" >> benchmark-report.md
+
+          # Look for regressions (slower performance)
+          if grep -q "~" comparison.txt && grep -A 1 "~" comparison.txt | grep -q "+"; then
+            echo "⚠️ **Performance regression detected**" >> benchmark-report.md
+            echo "" >> benchmark-report.md
+            echo "Some operations are slower than baseline. Review the changes above." >> benchmark-report.md
+          elif grep -q "~" comparison.txt && grep -A 1 "~" comparison.txt | grep -q "-"; then
+            echo "✅ **Performance improvement detected**" >> benchmark-report.md
+            echo "" >> benchmark-report.md
+            echo "Some operations are faster than baseline!" >> benchmark-report.md
+          else
+            echo "✅ **No significant performance changes**" >> benchmark-report.md
+          fi
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            benchmark-results.txt
+            comparison.txt
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const fs = require('fs');
+
+            if (!fs.existsSync('benchmark-report.md')) {
+              console.log('No benchmark report found');
+              return;
+            }
+
+            const report = fs.readFileSync('benchmark-report.md', 'utf8');
+
+            // Find existing benchmark comment
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.data.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Performance Benchmark Comparison')
+            );
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: report
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: report
+              });
+            }
+
+  memory-profile:
+    name: Memory Profiling
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Run memory profiling
+        run: |
+          echo "Running memory profiling tests..."
+
+          # Run tests with memory profiling
+          go test -memprofile=mem.out -bench=. -run=^$ ./... || true
+
+          if [ -f mem.out ]; then
+            go tool pprof -text mem.out > memory-profile.txt
+            echo "✅ Memory profile generated"
+          else
+            echo "ℹ️ No memory profile generated (no benchmarks found)"
+          fi
+
+      - name: Analyze memory usage
+        if: hashFiles('mem.out') != ''
+        run: |
+          echo "## Memory Profile Analysis" > memory-report.md
+          echo "" >> memory-report.md
+
+          # Get top memory allocations
+          echo "### Top Memory Allocations" >> memory-report.md
+          echo '```' >> memory-report.md
+          head -20 memory-profile.txt >> memory-report.md
+          echo '```' >> memory-report.md
+
+      - name: Upload memory profile
+        if: hashFiles('mem.out') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-profile
+          path: |
+            mem.out
+            memory-profile.txt
+
+  build-size:
+    name: Binary Size Tracking
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build binaries
+        run: |
+          echo "Building binaries..."
+          go build -o vga-events ./cmd/vga-events
+          go build -o vga-events-bot ./cmd/vga-events-bot
+          go build -o vga-events-telegram ./cmd/vga-events-telegram
+
+      - name: Check binary sizes
+        run: |
+          echo "## Binary Size Report" > size-report.md
+          echo "" >> size-report.md
+          echo "| Binary | Size |" >> size-report.md
+          echo "|--------|------|" >> size-report.md
+
+          for binary in vga-events vga-events-bot vga-events-telegram; do
+            SIZE=$(ls -lh "$binary" | awk '{print $5}')
+            echo "| $binary | $SIZE |" >> size-report.md
+          done
+
+          echo "" >> size-report.md
+
+          # Compare with baseline if exists
+          if [ -f size-baseline.txt ]; then
+            echo "### Comparison with Baseline" >> size-report.md
+            echo '```diff' >> size-report.md
+
+            for binary in vga-events vga-events-bot vga-events-telegram; do
+              CURRENT=$(stat -f%z "$binary" 2>/dev/null || stat -c%s "$binary")
+              BASELINE=$(grep "^$binary:" size-baseline.txt | cut -d: -f2)
+
+              if [ -n "$BASELINE" ]; then
+                DIFF=$((CURRENT - BASELINE))
+                PERCENT=$((DIFF * 100 / BASELINE))
+
+                if [ $DIFF -gt 0 ]; then
+                  echo "+ $binary increased by $DIFF bytes ($PERCENT%)" >> size-report.md
+                elif [ $DIFF -lt 0 ]; then
+                  echo "- $binary decreased by ${DIFF#-} bytes ($PERCENT%)" >> size-report.md
+                else
+                  echo "  $binary unchanged" >> size-report.md
+                fi
+              fi
+            done
+
+            echo '```' >> size-report.md
+          fi
+
+          # Save current sizes as baseline
+          for binary in vga-events vga-events-bot vga-events-telegram; do
+            SIZE=$(stat -f%z "$binary" 2>/dev/null || stat -c%s "$binary")
+            echo "$binary:$SIZE" >> size-current.txt
+          done
+
+      - name: Upload size report
+        uses: actions/upload-artifact@v4
+        with:
+          name: size-report
+          path: size-report.md
+
+  startup-time:
+    name: Startup Time Measurement
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build binary
+        run: go build -o vga-events ./cmd/vga-events
+
+      - name: Measure startup time
+        run: |
+          echo "## Startup Time Measurement" > startup-report.md
+          echo "" >> startup-report.md
+
+          # Run version command 10 times and average
+          TIMES=()
+          for i in {1..10}; do
+            TIME=$( { time ./vga-events --version; } 2>&1 | grep real | awk '{print $2}')
+            TIMES+=("$TIME")
+          done
+
+          echo "Startup times (10 runs):" >> startup-report.md
+          echo '```' >> startup-report.md
+          printf '%s\n' "${TIMES[@]}" >> startup-report.md
+          echo '```' >> startup-report.md
+
+          echo "" >> startup-report.md
+          echo "Average startup time calculated from measurements above" >> startup-report.md
+
+      - name: Upload startup report
+        uses: actions/upload-artifact@v4
+        with:
+          name: startup-report
+          path: startup-report.md

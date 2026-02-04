@@ -26,8 +26,9 @@ var (
 	checkReminders      = flag.Bool("check-reminders", false, "Check if event matches reminder days (exits 0 if match, 1 if no match)")
 	reminderDays        = flag.Int("reminder-days", 0, "Number of days before event to send reminder (used with --check-reminders)")
 	removalNotification = flag.Bool("removal-notification", false, "Send removal notifications (reads from removed_events field)")
-	eventStatus         = flag.String("event-status", "", "Event status for removal notification (registered/interested/maybe)")
-	eventNote           = flag.String("event-note", "", "User's note for the event (for removal notifications)")
+	changeNotification  = flag.Bool("change-notification", false, "Send change notifications (reads from changed_events field)")
+	eventStatus         = flag.String("event-status", "", "Event status for removal/change notification (registered/interested/maybe)")
+	eventNote           = flag.String("event-note", "", "User's note for the event (for removal/change notifications)")
 )
 
 // filterByState filters events by state code
@@ -91,7 +92,7 @@ func filterByReminderDays(events []*event.Event, days int) []*event.Event {
 func readEvents(filePath string) ([]*event.Event, error) {
 	var reader io.Reader
 	if filePath != "" {
-		f, err := os.Open(filePath)
+		f, err := os.Open(filePath) // #nosec G304 - File path from CLI flag, user controlled
 		if err != nil {
 			return nil, fmt.Errorf("opening events file: %w", err)
 		}
@@ -106,8 +107,9 @@ func readEvents(filePath string) ([]*event.Event, error) {
 	}
 
 	var result struct {
-		NewEvents     []*event.Event `json:"new_events"`
-		RemovedEvents []*event.Event `json:"removed_events"`
+		NewEvents     []*event.Event       `json:"new_events"`
+		RemovedEvents []*event.Event       `json:"removed_events"`
+		ChangedEvents []*event.EventChange `json:"changed_events"`
 	}
 
 	decoder := json.NewDecoder(reader)
@@ -119,7 +121,132 @@ func readEvents(filePath string) ([]*event.Event, error) {
 	if *removalNotification {
 		return result.RemovedEvents, nil
 	}
+	// For change notifications, we need to return nil here and handle separately
+	// since we need the EventChange objects, not Event objects
 	return result.NewEvents, nil
+}
+
+// readChangedEvents reads changed events from file or stdin
+// Returns both the changes and a map of current events for lookup
+func readChangedEvents(filePath string) ([]*event.EventChange, map[string]*event.Event, error) {
+	var reader io.Reader
+	if filePath != "" {
+		f, err := os.Open(filePath) // #nosec G304 - File path from CLI flag, user controlled
+		if err != nil {
+			return nil, nil, fmt.Errorf("opening events file: %w", err)
+		}
+		defer func() {
+			if err := f.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error closing file: %v\n", err)
+			}
+		}()
+		reader = f
+	} else {
+		reader = os.Stdin
+	}
+
+	var result struct {
+		NewEvents     []*event.Event       `json:"new_events"`
+		ChangedEvents []*event.EventChange `json:"changed_events"`
+	}
+
+	decoder := json.NewDecoder(reader)
+	if err := decoder.Decode(&result); err != nil {
+		return nil, nil, fmt.Errorf("parsing JSON: %w", err)
+	}
+
+	// Build event map for lookup
+	eventsMap := make(map[string]*event.Event)
+	for _, evt := range result.NewEvents {
+		eventsMap[evt.ID] = evt
+	}
+
+	return result.ChangedEvents, eventsMap, nil
+}
+
+// handleChangeNotifications handles the change notification flow
+func handleChangeNotifications() {
+	changes, eventsMap, err := readChangedEvents(*eventsFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading changed events: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(changes) == 0 {
+		fmt.Println("No changed events to send")
+		os.Exit(0)
+	}
+
+	// Filter by state if specified
+	if *stateFilter != "" {
+		filteredChanges := make([]*event.EventChange, 0)
+		for _, change := range changes {
+			if evt, exists := eventsMap[change.EventID]; exists {
+				if evt.State == *stateFilter {
+					filteredChanges = append(filteredChanges, change)
+				}
+			}
+		}
+		changes = filteredChanges
+	}
+
+	// Limit number of messages
+	if len(changes) > *maxMessages {
+		changes = changes[:*maxMessages]
+	}
+
+	if len(changes) == 0 {
+		fmt.Println("No changed events match criteria")
+		os.Exit(0)
+	}
+
+	// Dry run mode
+	if *dryRun {
+		handleDryRunChanges(changes, eventsMap)
+		os.Exit(0)
+	}
+
+	// Initialize Telegram client
+	if *botToken == "" {
+		fmt.Fprintf(os.Stderr, "Error: bot token is required (use --bot-token or TELEGRAM_BOT_TOKEN env var)\n")
+		os.Exit(1)
+	}
+
+	if *chatID == "" {
+		fmt.Fprintf(os.Stderr, "Error: chat ID is required (use --chat-id or TELEGRAM_CHAT_ID env var)\n")
+		os.Exit(1)
+	}
+
+	client, err := telegram.NewClient(*botToken, *chatID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error initializing Telegram client: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Send change notifications
+	for i, change := range changes {
+		evt, exists := eventsMap[change.EventID]
+		if !exists {
+			fmt.Fprintf(os.Stderr, "Warning: Event %s not found, skipping change notification\n", change.EventID)
+			continue
+		}
+
+		// Format the change message with status and note
+		msg, keyboard := telegram.FormatEventChangeWithNote(evt, change.ChangeType, change.OldValue, change.NewValue, *eventStatus, *eventNote)
+
+		// Send message with keyboard
+		if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
+			fmt.Fprintf(os.Stderr, "Error sending change notification for event %s: %v\n", evt.ID, err)
+			os.Exit(1)
+		}
+
+		// Rate limiting: wait between messages
+		if i < len(changes)-1 {
+			time.Sleep(1 * time.Second)
+		}
+	}
+
+	fmt.Printf("Successfully sent %d change notification(s)\n", len(changes))
 }
 
 // getCourseDetailsForEvent fetches course information for an event
@@ -166,7 +293,7 @@ func getCourseDetailsForEvent(client *course.Client, evt *event.Event) *telegram
 	}
 }
 
-// handleDryRun handles dry run mode output
+// handleDryRun handles dry run mode output for events
 func handleDryRun(events []*event.Event) {
 	notificationType := "new event"
 	if *removalNotification {
@@ -217,8 +344,41 @@ func handleDryRun(events []*event.Event) {
 	}
 }
 
+// handleDryRunChanges handles dry run mode output for change notifications
+func handleDryRunChanges(changes []*event.EventChange, eventsMap map[string]*event.Event) {
+	fmt.Printf("DRY RUN MODE - Would send %d change notification(s):\n\n", len(changes))
+
+	for i, change := range changes {
+		evt, exists := eventsMap[change.EventID]
+		if !exists {
+			fmt.Printf("--- Change Message %d/%d ---\n", i+1, len(changes))
+			fmt.Printf("WARNING: Event %s not found in current events\n\n", change.EventID)
+			continue
+		}
+
+		msg, _ := telegram.FormatEventChangeWithNote(evt, change.ChangeType, change.OldValue, change.NewValue, *eventStatus, *eventNote)
+
+		fmt.Printf("--- Change Message %d/%d ---\n", i+1, len(changes))
+		if *eventStatus != "" {
+			fmt.Printf("User status: %s\n", *eventStatus)
+		}
+		if *eventNote != "" {
+			fmt.Printf("User note: %s\n", *eventNote)
+		}
+		fmt.Println(msg)
+		fmt.Printf("\n(Length: %d characters)\n", len(msg))
+		fmt.Printf("Buttons: 📅 Update Calendar, ✅ Acknowledged\n\n")
+	}
+}
+
 func main() {
 	flag.Parse()
+
+	// Handle change notifications separately
+	if *changeNotification {
+		handleChangeNotifications()
+		return
+	}
 
 	// Read events from file or stdin
 	events, err := readEvents(*eventsFile)

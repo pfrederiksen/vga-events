@@ -27,8 +27,8 @@ func New(dataDir string) (*Storage, error) {
 		dataDir = filepath.Join(home, dataDir[2:])
 	}
 
-	// Create data directory if it doesn't exist
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	// Create data directory if it doesn't exist (owner: rwx, group: r-x, other: ---)
+	if err := os.MkdirAll(dataDir, 0750); err != nil {
 		return nil, fmt.Errorf("creating data directory: %w", err)
 	}
 
@@ -49,7 +49,7 @@ func (s *Storage) getSnapshotPath(state string) string {
 func (s *Storage) LoadSnapshot(state string) (*event.Snapshot, error) {
 	path := s.getSnapshotPath(state)
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 - Path is constructed from validated state parameter
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No previous snapshot, return empty one
