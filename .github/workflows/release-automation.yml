@@ -1,0 +1,249 @@
+name: Release Automation
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.7.1)'
+        required: true
+        type: string
+      release_type:
+        description: 'Release type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate-release:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_valid: ${{ steps.validate.outputs.is_valid }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Validate version format
+        id: validate
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid version format: $VERSION"
+            echo "Must be in format: v1.2.3"
+            echo "is_valid=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          echo "✅ Valid version format: $VERSION"
+          echo "is_valid=true" >> $GITHUB_OUTPUT
+
+      - name: Check if version exists
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "⚠️ Version $VERSION already exists"
+            exit 1
+          fi
+
+      - name: Check changelog
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if ! grep -q "$VERSION" CLAUDE.md; then
+            echo "⚠️ Version $VERSION not found in CLAUDE.md"
+            echo "Please add release notes before creating release"
+            exit 1
+          fi
+          echo "✅ Found release notes in CLAUDE.md"
+
+  generate-changelog:
+    name: Generate Changelog
+    needs: validate-release
+    runs-on: ubuntu-latest
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract changelog for version
+        id: changelog
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+
+          # Extract changelog from CLAUDE.md between this version and next
+          CHANGELOG=$(awk "/^\\*\\*$VERSION/,/^\\*\\*v[0-9]/ {
+            if (/^\\*\\*v[0-9]/ && !/^\\*\\*$VERSION/) exit;
+            if (/^\\*\\*$VERSION/) next;
+            print
+          }" CLAUDE.md)
+
+          if [ -z "$CHANGELOG" ]; then
+            echo "⚠️ No changelog found for $VERSION in CLAUDE.md"
+            CHANGELOG="No changelog provided"
+          fi
+
+          # Save to file for multiline output
+          echo "$CHANGELOG" > changelog.txt
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          cat changelog.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Generate commit summary
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -n "$PREV_TAG" ]; then
+            echo "## Commits since $PREV_TAG" >> changelog.txt
+            echo "" >> changelog.txt
+            git log --oneline "$PREV_TAG"..HEAD | sed 's/^/- /' >> changelog.txt
+          fi
+
+      - name: Upload changelog
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: changelog.txt
+
+  build-and-release:
+    name: Build and Release
+    needs: [validate-release, generate-changelog]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Download changelog
+        uses: actions/download-artifact@v4
+        with:
+          name: changelog
+
+      - name: Run tests
+        run: |
+          echo "Running tests before release..."
+          go test -v -race ./...
+
+      - name: Run linter
+        run: |
+          echo "Running linter before release..."
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+          golangci-lint run
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v5
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean --release-notes=changelog.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/github-script@v7
+        env:
+          CHANGELOG: ${{ needs.generate-changelog.outputs.changelog }}
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const version = '${{ needs.validate-release.outputs.version }}';
+            const changelog = process.env.CHANGELOG;
+
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: version,
+              name: version,
+              body: changelog,
+              draft: false,
+              prerelease: false
+            });
+
+  update-documentation:
+    name: Update Documentation
+    needs: [validate-release, build-and-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Update README badges
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+
+          # Update version badge if it exists
+          if grep -q "badge/version-" README.md; then
+            sed -i "s/badge\/version-v[0-9.]*-/badge\/version-$VERSION-/" README.md
+          fi
+
+      - name: Create documentation PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Docs: Update version badges to ${{ needs.validate-release.outputs.version }}"
+          branch: docs/release-${{ needs.validate-release.outputs.version }}
+          title: "Update documentation for ${{ needs.validate-release.outputs.version }}"
+          body: |
+            Auto-generated PR to update documentation after release.
+
+            Version: ${{ needs.validate-release.outputs.version }}
+
+            Changes:
+            - Update version badges in README.md
+          labels: documentation
+
+  notify-release:
+    name: Notify Release
+    needs: [validate-release, build-and-release]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Send success notification
+        if: needs.build-and-release.result == 'success'
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          echo "✅ Successfully released $VERSION"
+          echo "📦 Binaries available at: https://github.com/${{ github.repository }}/releases/tag/$VERSION"
+          echo "🍺 Homebrew formula updated"
+
+      - name: Send failure notification
+        if: needs.build-and-release.result == 'failure'
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          echo "❌ Release failed for $VERSION"
+          echo "Check logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"

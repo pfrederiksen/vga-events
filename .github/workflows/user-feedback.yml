@@ -1,0 +1,309 @@
+name: User Feedback Agent
+
+on:
+  issues:
+    types: [opened, labeled]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  triage-issue:
+    name: Triage New Issue
+    if: github.event_name == 'issues' && github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto-label feature requests
+        if: contains(github.event.issue.title, 'feature') || contains(github.event.issue.title, 'enhancement')
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['enhancement', 'needs-triage']
+            });
+
+      - name: Auto-label bug reports
+        if: contains(github.event.issue.title, 'bug') || contains(github.event.issue.title, 'error') || contains(github.event.issue.title, 'fix')
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['bug', 'needs-triage']
+            });
+
+      - name: Auto-label security issues
+        if: contains(github.event.issue.title, 'security') || contains(github.event.issue.title, 'vulnerability') || contains(github.event.issue.title, 'CVE')
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['security', 'high-priority']
+            });
+
+            // Add comment with security reporting instructions
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Thank you for reporting a security issue!\n\n**For security vulnerabilities**, please consider:\n1. Using GitHub Security Advisories (private disclosure)\n2. Contacting @pfrederiksen directly on Telegram: @iamdesertpaul\n\nThis helps us fix issues before public disclosure.`
+            });
+
+      - name: Welcome first-time contributor
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const issue = context.payload.issue;
+
+            // Check if this is the user's first issue
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              creator: issue.user.login,
+              state: 'all'
+            });
+
+            if (issues.data.length === 1) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `👋 Welcome @${issue.user.login}!\n\nThank you for opening your first issue! We appreciate your feedback and will review it soon.\n\n**Useful links:**\n- 📚 [Documentation](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/README.md)\n- 💬 [Telegram Bot](https://t.me/VGAEventsBot)\n- 🤝 [Contributing Guide](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CLAUDE.md)`
+              });
+            }
+
+  check-stale:
+    name: Check Stale Issues
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark stale issues
+        uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          stale-issue-message: |
+            This issue has been automatically marked as stale because it has not had recent activity.
+            It will be closed if no further activity occurs within 7 days.
+
+            If this issue is still relevant, please add a comment to keep it open.
+          stale-pr-message: |
+            This PR has been automatically marked as stale because it has not had recent activity.
+            It will be closed if no further activity occurs within 7 days.
+
+            If this PR is still relevant, please add a comment or push new commits to keep it open.
+          days-before-stale: 60
+          days-before-close: 7
+          stale-issue-label: 'stale'
+          stale-pr-label: 'stale'
+          exempt-issue-labels: 'security,high-priority,in-progress'
+          exempt-pr-labels: 'work-in-progress,security'
+
+  gather-feedback:
+    name: Gather User Feedback
+    if: github.event_name == 'issue_comment' && contains(github.event.comment.body, '/feedback')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Parse feedback
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const comment = context.payload.comment.body;
+            const issueNumber = context.issue.number;
+
+            // Extract feedback type
+            const feedbackMatch = comment.match(/\/feedback\s+(\w+)/);
+            if (!feedbackMatch) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: '❓ Please specify feedback type: `/feedback [positive|negative|suggestion]`'
+              });
+              return;
+            }
+
+            const feedbackType = feedbackMatch[1].toLowerCase();
+            const validTypes = ['positive', 'negative', 'suggestion'];
+
+            if (!validTypes.includes(feedbackType)) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `❓ Invalid feedback type: ${feedbackType}\n\nValid types: ${validTypes.join(', ')}`
+              });
+              return;
+            }
+
+            // Add label based on feedback type
+            const labelMap = {
+              'positive': 'feedback-positive',
+              'negative': 'feedback-negative',
+              'suggestion': 'enhancement'
+            };
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: [labelMap[feedbackType], 'user-feedback']
+            });
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `✅ Thank you for your ${feedbackType} feedback! We've tagged this issue for review.`
+            });
+
+  analyze-feedback:
+    name: Analyze User Feedback
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Gather feedback statistics
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            // Get all issues with feedback labels
+            const positiveIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'feedback-positive',
+              state: 'all'
+            });
+
+            const negativeIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'feedback-negative',
+              state: 'all'
+            });
+
+            const suggestions = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'enhancement,user-feedback',
+              state: 'open'
+            });
+
+            const report = `# User Feedback Analysis
+
+Generated: ${new Date().toISOString()}
+
+## Summary
+
+- 👍 Positive Feedback: ${positiveIssues.data.length}
+- 👎 Negative Feedback: ${negativeIssues.data.length}
+- 💡 User Suggestions: ${suggestions.data.length}
+
+## Recent Positive Feedback
+
+${positiveIssues.data.slice(0, 5).map(issue =>
+  `- [#${issue.number}](${issue.html_url}) - ${issue.title}`
+).join('\n')}
+
+## Recent Negative Feedback
+
+${negativeIssues.data.slice(0, 5).map(issue =>
+  `- [#${issue.number}](${issue.html_url}) - ${issue.title}`
+).join('\n')}
+
+## Top User Suggestions
+
+${suggestions.data.slice(0, 10).map(issue =>
+  `- [#${issue.number}](${issue.html_url}) - ${issue.title} (👍 ${issue.reactions['+1']})`
+).join('\n')}
+
+## Recommendations
+
+${negativeIssues.data.length > positiveIssues.data.length ?
+  '⚠️ **Action Required**: More negative than positive feedback. Review recent issues.' :
+  '✅ Feedback is generally positive. Keep up the good work!'}
+`;
+
+            console.log(report);
+
+            // Create or update feedback summary issue
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'feedback-summary',
+              state: 'open'
+            });
+
+            if (existingIssues.data.length > 0) {
+              // Update existing issue
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssues.data[0].number,
+                body: report
+              });
+            } else {
+              // Create new issue
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'User Feedback Summary',
+                body: report,
+                labels: ['feedback-summary', 'documentation']
+              });
+            }
+
+  telegram-feedback:
+    name: Process Telegram Feedback
+    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'telegram-bot')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tag bot-related issues
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const issue = context.payload.issue;
+
+            // Check if issue mentions specific bot commands
+            const commands = ['/subscribe', '/unsubscribe', '/events', '/search', '/filter', '/bulk'];
+            const mentionedCommands = commands.filter(cmd => issue.body.includes(cmd));
+
+            if (mentionedCommands.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `📝 This issue mentions bot commands: ${mentionedCommands.join(', ')}\n\nRelevant code locations:\n- \`cmd/vga-events-bot/main.go\`\n- \`internal/telegram/\`\n\nCC: @pfrederiksen`
+              });
+
+              // Add command-specific labels
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: ['bot-commands']
+              });
+            }

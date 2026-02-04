@@ -1,0 +1,345 @@
+name: Refactoring Assistant
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.go'
+  schedule:
+    # Run monthly on the 1st at 9 AM UTC
+    - cron: '0 9 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  code-complexity:
+    name: Analyze Code Complexity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install gocyclo
+        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+
+      - name: Check cyclomatic complexity
+        run: |
+          echo "## Code Complexity Analysis" > complexity-report.md
+          echo "" >> complexity-report.md
+
+          # Find functions with complexity > 15
+          gocyclo -over 15 . > high-complexity.txt || true
+
+          if [ -s high-complexity.txt ]; then
+            echo "⚠️ **High Complexity Functions Found**" >> complexity-report.md
+            echo "" >> complexity-report.md
+            echo "Functions with cyclomatic complexity > 15 should be refactored:" >> complexity-report.md
+            echo "" >> complexity-report.md
+            echo '```' >> complexity-report.md
+            cat high-complexity.txt >> complexity-report.md
+            echo '```' >> complexity-report.md
+            echo "" >> complexity-report.md
+            echo "**Recommendations:**" >> complexity-report.md
+            echo "- Extract helper functions" >> complexity-report.md
+            echo "- Simplify conditional logic" >> complexity-report.md
+            echo "- Use early returns" >> complexity-report.md
+          else
+            echo "✅ **No high complexity functions found**" >> complexity-report.md
+            echo "" >> complexity-report.md
+            echo "All functions have cyclomatic complexity ≤ 15" >> complexity-report.md
+          fi
+
+      - name: Upload complexity report
+        uses: actions/upload-artifact@v4
+        with:
+          name: complexity-report
+          path: complexity-report.md
+
+  code-duplication:
+    name: Detect Code Duplication
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install dupl
+        run: go install github.com/mibk/dupl@latest
+
+      - name: Check for duplicated code
+        run: |
+          echo "## Code Duplication Analysis" > duplication-report.md
+          echo "" >> duplication-report.md
+
+          # Find duplicated code blocks (threshold: 15 tokens)
+          dupl -t 15 -html . > duplication.html 2>&1 || true
+          dupl -t 15 . > duplication.txt 2>&1 || true
+
+          if [ -s duplication.txt ] && ! grep -q "No duplicates found" duplication.txt; then
+            echo "⚠️ **Code Duplication Detected**" >> duplication-report.md
+            echo "" >> duplication-report.md
+            echo '```' >> duplication-report.md
+            head -50 duplication.txt >> duplication-report.md
+            echo '```' >> duplication-report.md
+            echo "" >> duplication-report.md
+            echo "**Recommendations:**" >> duplication-report.md
+            echo "- Extract common code into helper functions" >> duplication-report.md
+            echo "- Consider using composition or interfaces" >> duplication-report.md
+            echo "- Review duplicated blocks for refactoring opportunities" >> duplication-report.md
+          else
+            echo "✅ **No significant code duplication found**" >> duplication-report.md
+          fi
+
+      - name: Upload duplication report
+        uses: actions/upload-artifact@v4
+        with:
+          name: duplication-report
+          path: |
+            duplication-report.md
+            duplication.html
+
+  code-smells:
+    name: Detect Code Smells
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Check for long functions
+        run: |
+          echo "## Code Smell Analysis" > smells-report.md
+          echo "" >> smells-report.md
+
+          # Find functions longer than 50 lines
+          echo "### Long Functions (>50 lines)" >> smells-report.md
+          echo "" >> smells-report.md
+
+          LONG_FUNCS=$(find . -name "*.go" -not -path "./vendor/*" -exec awk '
+            /^func / { start=NR; name=$0 }
+            /^}/ && start {
+              length=NR-start;
+              if (length > 50) print FILENAME ":" start ":" name " (" length " lines)"
+              start=0
+            }
+          ' {} \; | sort -t: -k4 -nr)
+
+          if [ -n "$LONG_FUNCS" ]; then
+            echo '```' >> smells-report.md
+            echo "$LONG_FUNCS" | head -10 >> smells-report.md
+            echo '```' >> smells-report.md
+          else
+            echo "✅ No functions longer than 50 lines" >> smells-report.md
+          fi
+
+      - name: Check for wide interfaces
+        run: |
+          echo "" >> smells-report.md
+          echo "### Wide Interfaces (>10 methods)" >> smells-report.md
+          echo "" >> smells-report.md
+
+          # Find interfaces with many methods
+          WIDE_INTERFACES=$(find . -name "*.go" -not -path "./vendor/*" -exec awk '
+            /^type .* interface/ { iface=$2; count=0 }
+            iface && /^\s+[A-Z]/ { count++ }
+            iface && /^}/ {
+              if (count > 10) print FILENAME ":" iface " (" count " methods)"
+              iface=""
+            }
+          ' {} \;)
+
+          if [ -n "$WIDE_INTERFACES" ]; then
+            echo '```' >> smells-report.md
+            echo "$WIDE_INTERFACES" >> smells-report.md
+            echo '```' >> smells-report.md
+            echo "" >> smells-report.md
+            echo "**Recommendation:** Consider splitting large interfaces (Interface Segregation Principle)" >> smells-report.md
+          else
+            echo "✅ No interfaces with more than 10 methods" >> smells-report.md
+          fi
+
+      - name: Check for large structs
+        run: |
+          echo "" >> smells-report.md
+          echo "### Large Structs (>20 fields)" >> smells-report.md
+          echo "" >> smells-report.md
+
+          # Find structs with many fields
+          LARGE_STRUCTS=$(find . -name "*.go" -not -path "./vendor/*" -exec awk '
+            /^type .* struct/ { struct=$2; count=0 }
+            struct && /^\s+[A-Z]/ { count++ }
+            struct && /^}/ {
+              if (count > 20) print FILENAME ":" struct " (" count " fields)"
+              struct=""
+            }
+          ' {} \;)
+
+          if [ -n "$LARGE_STRUCTS" ]; then
+            echo '```' >> smells-report.md
+            echo "$LARGE_STRUCTS" >> smells-report.md
+            echo '```' >> smells-report.md
+            echo "" >> smells-report.md
+            echo "**Recommendation:** Consider breaking down large structs into smaller, focused types" >> smells-report.md
+          else
+            echo "✅ No structs with more than 20 fields" >> smells-report.md
+          fi
+
+      - name: Upload smells report
+        uses: actions/upload-artifact@v4
+        with:
+          name: smells-report
+          path: smells-report.md
+
+  suggest-refactoring:
+    name: Suggest Refactoring Opportunities
+    runs-on: ubuntu-latest
+    needs: [code-complexity, code-duplication, code-smells]
+    steps:
+      - name: Download all reports
+        uses: actions/download-artifact@v4
+
+      - name: Combine reports
+        run: |
+          echo "# Refactoring Suggestions" > refactoring-report.md
+          echo "" >> refactoring-report.md
+          echo "Generated: $(date -u)" >> refactoring-report.md
+          echo "" >> refactoring-report.md
+
+          # Combine all reports
+          if [ -f complexity-report/complexity-report.md ]; then
+            cat complexity-report/complexity-report.md >> refactoring-report.md
+            echo "" >> refactoring-report.md
+          fi
+
+          if [ -f duplication-report/duplication-report.md ]; then
+            cat duplication-report/duplication-report.md >> refactoring-report.md
+            echo "" >> refactoring-report.md
+          fi
+
+          if [ -f smells-report/smells-report.md ]; then
+            cat smells-report/smells-report.md >> refactoring-report.md
+            echo "" >> refactoring-report.md
+          fi
+
+          echo "## Priority Recommendations" >> refactoring-report.md
+          echo "" >> refactoring-report.md
+          echo "Based on the analysis above, consider these refactoring priorities:" >> refactoring-report.md
+          echo "" >> refactoring-report.md
+          echo "1. **High Priority**: Fix high complexity functions (>15)" >> refactoring-report.md
+          echo "2. **Medium Priority**: Eliminate code duplication" >> refactoring-report.md
+          echo "3. **Low Priority**: Address code smells (long functions, large structs)" >> refactoring-report.md
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('refactoring-report.md', 'utf8');
+
+            // Only comment if there are actual suggestions
+            if (report.includes('⚠️')) {
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+
+              const botComment = comments.data.find(comment =>
+                comment.user.type === 'Bot' &&
+                comment.body.includes('Refactoring Suggestions')
+              );
+
+              if (botComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComment.id,
+                  body: report
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: report
+                });
+              }
+            }
+
+  create-refactoring-issues:
+    name: Create Refactoring Issues
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    needs: suggest-refactoring
+    steps:
+      - name: Download refactoring report
+        uses: actions/download-artifact@v4
+        with:
+          name: refactoring-report
+
+      - name: Create issues for refactoring opportunities
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('refactoring-report.md', 'utf8');
+
+            // Only create issues if refactoring needed
+            if (!report.includes('⚠️')) {
+              console.log('✅ No refactoring needed');
+              return;
+            }
+
+            // Check if refactoring issue already exists
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'refactoring,automated',
+              state: 'open'
+            });
+
+            const thisMonth = new Date().toISOString().slice(0, 7);
+            const monthlyIssue = existingIssues.data.find(issue =>
+              issue.title.includes(thisMonth)
+            );
+
+            if (monthlyIssue) {
+              // Update existing issue
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: monthlyIssue.number,
+                body: report
+              });
+              console.log(`Updated issue #${monthlyIssue.number}`);
+            } else {
+              // Create new monthly refactoring issue
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Refactoring Opportunities (${thisMonth})`,
+                body: report,
+                labels: ['refactoring', 'automated', 'technical-debt']
+              });
+              console.log(`Created issue #${issue.data.number}`);
+            }
