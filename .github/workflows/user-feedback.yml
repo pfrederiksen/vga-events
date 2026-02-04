@@ -235,9 +235,10 @@ ${negativeIssues.data.slice(0, 5).map(issue =>
 
 ## Top User Suggestions
 
-${suggestions.data.slice(0, 10).map(issue =>
-  `- [#${issue.number}](${issue.html_url}) - ${issue.title} (👍 ${issue.reactions['+1']})`
-).join('\n')}
+${suggestions.data.slice(0, 10).map(issue => {
+  const thumbsUp = issue.reactions ? (issue.reactions['+1'] || 0) : 0;
+  return `- [#${issue.number}](${issue.html_url}) - ${issue.title} (👍 ${thumbsUp})`;
+}).join('\n')}
 
 ## Recommendations
 
