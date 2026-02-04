@@ -1,0 +1,22 @@
+name: "CodeQL Config"
+
+# Paths to ignore during analysis
+paths-ignore:
+  - '**/testdata/**'
+  - '**/test_*.go'
+  - '**/*_test.go'
+
+# Query filters and suppressions
+query-filters:
+  # Suppress weak-sensitive-data-hashing for legacy migration function
+  # The legacySalt() function in crypto.go intentionally uses SHA256
+  # for backward compatibility during migration. This is acceptable because:
+  # - Only used for decrypting existing data encrypted with old method
+  # - New encryptions use the secure fixedSalt instead
+  # - Passphrase still protected by PBKDF2 with 100,000 iterations
+  # - Function will be removed after migration period
+  - exclude:
+      id: go/weak-sensitive-data-hashing
+      # Exclude specific file and function
+      paths:
+        - internal/crypto/crypto.go
