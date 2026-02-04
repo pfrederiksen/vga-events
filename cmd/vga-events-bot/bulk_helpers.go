@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	errNoEventIDs = errNoEventIDs
+	errNoEventIDs = "❌ No event IDs provided."
 )
 
 // parseBulkEventIDs parses event IDs from command parts, supporting both
