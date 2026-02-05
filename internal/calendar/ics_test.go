@@ -374,3 +374,332 @@ func TestGenerateBulkICS_WithCustomName(t *testing.T) {
 		t.Error("ICS should contain END:VCALENDAR")
 	}
 }
+
+// TestGenerateICSWithOptions_Alarm tests that alarms are added correctly
+func TestGenerateICSWithOptions_Alarm(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test-event",
+		State:    "NV",
+		Title:    "Test Event",
+		DateText: "Apr 4 2026",
+		City:     "Las Vegas",
+	}
+
+	opts := &EventOptions{
+		ReminderBefore: 24 * time.Hour, // 1 day before
+	}
+
+	ics := GenerateICSWithOptions(evt, opts)
+
+	// Should contain VALARM component
+	if !strings.Contains(ics, "BEGIN:VALARM") {
+		t.Error("ICS should contain BEGIN:VALARM")
+	}
+	if !strings.Contains(ics, "END:VALARM") {
+		t.Error("ICS should contain END:VALARM")
+	}
+	if !strings.Contains(ics, "ACTION:DISPLAY") {
+		t.Error("ICS should contain ACTION:DISPLAY")
+	}
+	if !strings.Contains(ics, "TRIGGER:-PT24H") {
+		t.Error("ICS should contain TRIGGER:-PT24H for 24 hour reminder")
+	}
+}
+
+// TestGenerateICSWithOptions_Status tests status-based properties
+func TestGenerateICSWithOptions_Status(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test-event",
+		State:    "NV",
+		Title:    "Test Event",
+		DateText: "Apr 4 2026",
+		City:     "Las Vegas",
+	}
+
+	tests := []struct {
+		status       string
+		wantEmoji    string
+		wantCategory string
+		wantColor    string
+	}{
+		{"registered", "✅", "CATEGORIES:Registered", "COLOR:green"},
+		{"interested", "⭐", "CATEGORIES:Interested", "COLOR:yellow"},
+		{"maybe", "🤔", "CATEGORIES:Maybe", "COLOR:gray"},
+		{"skip", "❌", "CATEGORIES:Skipped", "COLOR:black"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			opts := &EventOptions{
+				Status: tt.status,
+			}
+
+			ics := GenerateICSWithOptions(evt, opts)
+
+			// Check emoji in summary
+			if !strings.Contains(ics, tt.wantEmoji) {
+				t.Errorf("ICS should contain emoji %s for status %s", tt.wantEmoji, tt.status)
+			}
+
+			// Check category
+			if !strings.Contains(ics, tt.wantCategory) {
+				t.Errorf("ICS should contain %s", tt.wantCategory)
+			}
+
+			// Check color
+			if !strings.Contains(ics, tt.wantColor) {
+				t.Errorf("ICS should contain %s", tt.wantColor)
+			}
+		})
+	}
+}
+
+// TestGenerateICSWithOptions_CourseDetails tests course details in description
+func TestGenerateICSWithOptions_CourseDetails(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test-event",
+		State:    "NV",
+		Title:    "Test Event",
+		DateText: "Apr 4 2026",
+		City:     "Las Vegas",
+	}
+
+	opts := &EventOptions{
+		CourseDetails: &CourseInfo{
+			Name: "Chimera Golf Club",
+			Tees: []TeeInfo{
+				{Name: "Championship", Par: 72, Yardage: 7041},
+				{Name: "Blue", Par: 72, Yardage: 6500},
+			},
+		},
+	}
+
+	ics := GenerateICSWithOptions(evt, opts)
+
+	// Should contain course name in description
+	if !strings.Contains(ics, "Chimera Golf Club") {
+		t.Error("ICS description should contain course name")
+	}
+
+	// Should contain tee details
+	if !strings.Contains(ics, "Championship") {
+		t.Error("ICS description should contain tee name")
+	}
+	if !strings.Contains(ics, "Par 72") {
+		t.Error("ICS description should contain par")
+	}
+	if !strings.Contains(ics, "7041 yds") {
+		t.Error("ICS description should contain yardage")
+	}
+}
+
+// TestGenerateICSWithOptions_Note tests user notes in description
+func TestGenerateICSWithOptions_Note(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test-event",
+		State:    "NV",
+		Title:    "Test Event",
+		DateText: "Apr 4 2026",
+		City:     "Las Vegas",
+	}
+
+	opts := &EventOptions{
+		Note: "Bring extra balls",
+	}
+
+	ics := GenerateICSWithOptions(evt, opts)
+
+	// Should contain note in description
+	if !strings.Contains(ics, "Note: Bring extra balls") {
+		t.Error("ICS description should contain user note")
+	}
+}
+
+// TestGenerateBulkICSWithOptions tests bulk export with per-event options
+func TestGenerateBulkICSWithOptions(t *testing.T) {
+	events := []*event.Event{
+		{
+			ID:       "event1",
+			State:    "NV",
+			Title:    "Event 1",
+			DateText: "Apr 4 2026",
+			City:     "Las Vegas",
+		},
+		{
+			ID:       "event2",
+			State:    "CA",
+			Title:    "Event 2",
+			DateText: "May 15 2026",
+			City:     "Monterey",
+		},
+	}
+
+	optsMap := map[string]*EventOptions{
+		"event1": {
+			Status: "registered",
+			Note:   "First event",
+		},
+		"event2": {
+			Status: "interested",
+		},
+	}
+
+	ics := GenerateBulkICSWithOptions(events, "Test Calendar", optsMap)
+
+	// Should contain both events
+	if !strings.Contains(ics, "UID:event1@vgagolf.org") {
+		t.Error("ICS should contain event1")
+	}
+	if !strings.Contains(ics, "UID:event2@vgagolf.org") {
+		t.Error("ICS should contain event2")
+	}
+
+	// Should contain status-specific properties
+	if !strings.Contains(ics, "✅") {
+		t.Error("ICS should contain registered emoji for event1")
+	}
+	if !strings.Contains(ics, "⭐") {
+		t.Error("ICS should contain interested emoji for event2")
+	}
+
+	// Should contain note
+	if !strings.Contains(ics, "Note: First event") {
+		t.Error("ICS should contain note for event1")
+	}
+
+	// Should contain alarms (default 24h)
+	alarmCount := strings.Count(ics, "BEGIN:VALARM")
+	if alarmCount != 2 {
+		t.Errorf("ICS should contain 2 alarms, got %d", alarmCount)
+	}
+}
+
+// TestGetStatusEmoji tests status emoji mapping
+func TestGetStatusEmoji(t *testing.T) {
+	tests := []struct {
+		status string
+		want   string
+	}{
+		{"registered", "✅"},
+		{"interested", "⭐"},
+		{"maybe", "🤔"},
+		{"skip", "❌"},
+		{"unknown", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			got := getStatusEmoji(tt.status)
+			if got != tt.want {
+				t.Errorf("getStatusEmoji(%q) = %q, want %q", tt.status, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGetStatusCategory tests status category mapping
+func TestGetStatusCategory(t *testing.T) {
+	tests := []struct {
+		status string
+		want   string
+	}{
+		{"registered", "Registered"},
+		{"interested", "Interested"},
+		{"maybe", "Maybe"},
+		{"skip", "Skipped"},
+		{"unknown", "VGA Golf"},
+		{"", "VGA Golf"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			got := getStatusCategory(tt.status)
+			if got != tt.want {
+				t.Errorf("getStatusCategory(%q) = %q, want %q", tt.status, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGetStatusColor tests status color mapping
+func TestGetStatusColor(t *testing.T) {
+	tests := []struct {
+		status string
+		want   string
+	}{
+		{"registered", "green"},
+		{"interested", "yellow"},
+		{"maybe", "gray"},
+		{"skip", "black"},
+		{"unknown", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			got := getStatusColor(tt.status)
+			if got != tt.want {
+				t.Errorf("getStatusColor(%q) = %q, want %q", tt.status, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGenerateICSWithOptions_DefaultAlarm tests default alarm behavior
+func TestGenerateICSWithOptions_DefaultAlarm(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test-event",
+		State:    "NV",
+		Title:    "Test Event",
+		DateText: "Apr 4 2026",
+		City:     "Las Vegas",
+	}
+
+	// No options provided - should still get default alarm
+	ics := GenerateICS(evt)
+
+	// Should contain VALARM with default 24h reminder
+	if !strings.Contains(ics, "BEGIN:VALARM") {
+		t.Error("ICS should contain BEGIN:VALARM with default options")
+	}
+	if !strings.Contains(ics, "TRIGGER:-PT24H") {
+		t.Error("ICS should contain default TRIGGER:-PT24H")
+	}
+}
+
+// TestGenerateICSWithOptions_CustomReminder tests custom reminder timing
+func TestGenerateICSWithOptions_CustomReminder(t *testing.T) {
+	evt := &event.Event{
+		ID:       "test-event",
+		State:    "NV",
+		Title:    "Test Event",
+		DateText: "Apr 4 2026",
+		City:     "Las Vegas",
+	}
+
+	tests := []struct {
+		name           string
+		reminderBefore time.Duration
+		wantTrigger    string
+	}{
+		{"1 day", 24 * time.Hour, "-PT24H"},
+		{"2 days", 48 * time.Hour, "-PT48H"},
+		{"1 week", 168 * time.Hour, "-PT168H"},
+		{"12 hours", 12 * time.Hour, "-PT12H"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := &EventOptions{
+				ReminderBefore: tt.reminderBefore,
+			}
+
+			ics := GenerateICSWithOptions(evt, opts)
+
+			if !strings.Contains(ics, "TRIGGER:"+tt.wantTrigger) {
+				t.Errorf("ICS should contain TRIGGER:%s", tt.wantTrigger)
+			}
+		})
+	}
+}

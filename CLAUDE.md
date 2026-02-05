@@ -20,7 +20,7 @@ Welcome to the VGA Events Bot project documentation. This interactive Telegram b
 
 ## Project Overview
 
-**Current Version:** v0.7.0
+**Current Version:** v0.8.0
 
 **Key Features:**
 - ✅ Multi-user Telegram bot with personalized notifications
