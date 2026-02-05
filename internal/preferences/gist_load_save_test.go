@@ -145,7 +145,7 @@ func TestGistStorage_LoadSaveRoundtrip(t *testing.T) {
 	user2 := original.GetUser("user2")
 	user2.States = []string{"TX", "AZ"}
 	user2.Active = false
-	user2.DigestFrequency = "daily"
+	user2.DigestFrequency = DigestFrequencyDaily
 
 	// Convert to JSON
 	jsonBytes, err := json.Marshal(original)
@@ -236,7 +236,7 @@ func TestNewGistStorageValidation(t *testing.T) {
 			t.Errorf("NewGistStorage() unexpected error: %v", err)
 		}
 		if storage == nil {
-			t.Error("NewGistStorage() returned nil storage")
+			t.Fatal("NewGistStorage() returned nil storage")
 		}
 		if storage.httpClient == nil {
 			t.Error("NewGistStorage() did not initialize httpClient")

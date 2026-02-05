@@ -801,7 +801,6 @@ func processCommand(prefs preferences.Preferences, chatID, text string, modified
 		}
 		return handleUnsubscribe(prefs, chatID, parts[1], modified), nil
 
-
 	case "/search":
 		if len(parts) < 2 {
 			return `🔍 <b>Event Search</b>
@@ -834,7 +833,6 @@ Please provide a search keyword.
 			stateFilter = strings.ToUpper(strings.TrimSpace(parts[1]))
 		}
 		return handleExportCalendar(prefs, chatID, stateFilter, botToken, dryRun)
-
 
 	case "/note":
 		if len(parts) < 2 {
