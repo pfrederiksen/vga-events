@@ -171,6 +171,20 @@ func eventsEqual(a, b *event.Event) bool {
 		a.SourceURL == b.SourceURL
 }
 
+// validateSingleEventSnapshot validates that a snapshot contains exactly one event with the given ID
+func validateSingleEventSnapshot(t *testing.T, storage *Storage, state, eventID string) {
+	snapshot, err := storage.LoadSnapshot(state)
+	if err != nil {
+		t.Fatalf("Failed to load snapshot: %v", err)
+	}
+	if len(snapshot.Events) != 1 {
+		t.Errorf("Snapshot has %d events, want 1", len(snapshot.Events))
+	}
+	if snapshot.Events[eventID] == nil {
+		t.Errorf("Event %s not found in snapshot", eventID)
+	}
+}
+
 func TestGetEventByID_StateSpecificFallback(t *testing.T) {
 	// Create a temporary directory for test snapshots
 	tmpDir, err := os.MkdirTemp("", "storage-test-fallback-*")
@@ -307,16 +321,7 @@ func TestCreateSnapshotFromEvents(t *testing.T) {
 			state:   "CA",
 			wantErr: false,
 			validate: func(t *testing.T, storage *Storage, state string) {
-				snapshot, err := storage.LoadSnapshot(state)
-				if err != nil {
-					t.Fatalf("Failed to load snapshot: %v", err)
-				}
-				if len(snapshot.Events) != 1 {
-					t.Errorf("Snapshot has %d events, want 1", len(snapshot.Events))
-				}
-				if snapshot.Events["ca-evt-001"] == nil {
-					t.Error("Event ca-evt-001 not found in snapshot")
-				}
+				validateSingleEventSnapshot(t, storage, state, "ca-evt-001")
 			},
 		},
 		{
@@ -350,17 +355,8 @@ func TestCreateSnapshotFromEvents(t *testing.T) {
 			state:   "all",
 			wantErr: false,
 			validate: func(t *testing.T, storage *Storage, state string) {
-				snapshot, err := storage.LoadSnapshot(state)
-				if err != nil {
-					t.Fatalf("Failed to load snapshot: %v", err)
-				}
 				// Should only have 1 event (overwrites previous snapshot)
-				if len(snapshot.Events) != 1 {
-					t.Errorf("Snapshot has %d events, want 1 (should overwrite)", len(snapshot.Events))
-				}
-				if snapshot.Events["new-evt-001"] == nil {
-					t.Error("Event new-evt-001 not found in snapshot")
-				}
+				validateSingleEventSnapshot(t, storage, state, "new-evt-001")
 			},
 		},
 	}
