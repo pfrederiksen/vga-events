@@ -198,6 +198,7 @@ Get personalized VGA event notifications via Telegram! The bot supports multiple
 Send these commands to your bot in Telegram:
 
 **Essential Commands:**
+- `/start` - Start the bot and see welcome message
 - `/menu` - Quick actions menu with buttons
 - `/help` - Show help message with all commands
 - `/help <command>` - Get detailed help for a specific command (e.g., `/help filter`)
@@ -256,6 +257,13 @@ When you receive event notifications, use the status buttons to track them:
 - 🤔 **Maybe** - Events you're considering
 - ❌ **Skip** - Events you're not interested in
 
+**Statistics:**
+- `/stats` - View your activity statistics
+- `/stats week` - This week's stats
+- `/stats month` - Last 30 days
+- `/stats all` - All-time statistics
+- Track events viewed, marked, and registered
+
 **Reminders:**
 - `/reminders` - Configure event reminders (1 day, 3 days, 1 week, or 2 weeks before)
 - Get reminded about events you've marked as ⭐ Interested or ✅ Registered
@@ -265,6 +273,13 @@ When you receive event notifications, use the status buttons to track them:
   - Immediate (default) - Get notified right away
   - Daily digest - Receive a daily summary at 9 AM UTC
   - Weekly digest - Receive a weekly summary on Mondays
+- `/notify-removals on|off` - Toggle notifications when events are removed or cancelled
+
+**Social Features:**
+- `/invite` - Generate an invite code to share with friends
+- `/join <code>` - Join using a friend's invite code
+- `/friends` - View your friends list
+- See which friends are registered for events (opt-in with privacy controls)
 
 **Multi-User Support:** Each person gets their own subscriptions, event tracking, and reminder preferences!
 

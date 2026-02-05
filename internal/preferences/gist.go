@@ -99,8 +99,18 @@ func (g *GistStorage) Load() (Preferences, error) {
 
 	// Decrypt sensitive fields if encryptor is configured
 	if g.encryptor != nil {
-		if err := g.decryptPreferences(prefs); err != nil {
+		needsMigration, err := g.decryptPreferencesWithMigration(prefs)
+		if err != nil {
 			return nil, fmt.Errorf("decrypting preferences: %w", err)
+		}
+
+		// If migration occurred, re-save with new encryption
+		if needsMigration {
+			if err := g.Save(prefs); err != nil {
+				// Log warning but don't fail the load
+				// Migration will be retried on next save
+				_ = err // Suppress linter warning
+			}
 		}
 	}
 
@@ -271,5 +281,55 @@ func (g *GistStorage) encryptPreferences(prefs Preferences) error {
 
 // decryptPreferences decrypts sensitive fields in all user preferences
 func (g *GistStorage) decryptPreferences(prefs Preferences) error {
-	return g.transformSensitiveFields(prefs, g.encryptor.DecryptMap, g.encryptor.Decrypt, "decrypting")
+	_, err := g.decryptPreferencesWithMigration(prefs)
+	return err
+}
+
+// decryptPreferencesWithMigration decrypts sensitive fields and returns whether migration occurred
+func (g *GistStorage) decryptPreferencesWithMigration(prefs Preferences) (bool, error) {
+	if g.encryptor == nil {
+		return false, nil
+	}
+
+	anyMigration := false
+
+	for _, userPrefs := range prefs {
+		// Decrypt event notes
+		if len(userPrefs.EventNotes) > 0 {
+			decrypted, needsMigration, err := g.encryptor.DecryptMapWithMigration(userPrefs.EventNotes)
+			if err != nil {
+				return false, fmt.Errorf("decrypting event notes: %w", err)
+			}
+			userPrefs.EventNotes = decrypted
+			if needsMigration {
+				anyMigration = true
+			}
+		}
+
+		// Decrypt event statuses
+		if len(userPrefs.EventStatuses) > 0 {
+			decrypted, needsMigration, err := g.encryptor.DecryptMapWithMigration(userPrefs.EventStatuses)
+			if err != nil {
+				return false, fmt.Errorf("decrypting event statuses: %w", err)
+			}
+			userPrefs.EventStatuses = decrypted
+			if needsMigration {
+				anyMigration = true
+			}
+		}
+
+		// Decrypt invite code
+		if userPrefs.InviteCode != "" {
+			decrypted, needsMigration, err := g.encryptor.DecryptWithMigration(userPrefs.InviteCode)
+			if err != nil {
+				return false, fmt.Errorf("decrypting invite code: %w", err)
+			}
+			userPrefs.InviteCode = decrypted
+			if needsMigration {
+				anyMigration = true
+			}
+		}
+	}
+
+	return anyMigration, nil
 }
