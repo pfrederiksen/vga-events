@@ -214,15 +214,14 @@ func TestAnswerCallbackQuery_Success(t *testing.T) {
 	}
 }
 
-// TestAnswerCallbackQuery_WithEmptyID tests behavior with empty callback ID
-// Note: The function doesn't validate parameters, so this will make an HTTP call
-func TestAnswerCallbackQuery_WithEmptyID(t *testing.T) {
+// testAnswerCallbackQueryError is a helper for testing AnswerCallbackQuery error cases
+func testAnswerCallbackQueryError(t *testing.T, callbackID, errorDesc string) {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Return error for empty callback_query_id
 		w.WriteHeader(http.StatusBadRequest)
 		response := map[string]interface{}{
 			"ok":          false,
-			"description": "Bad Request: query is empty",
+			"description": errorDesc,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(response)
@@ -239,40 +238,20 @@ func TestAnswerCallbackQuery_WithEmptyID(t *testing.T) {
 		httpClient: &http.Client{},
 	}
 
-	err := client.AnswerCallbackQuery("", "text", false)
+	err := client.AnswerCallbackQuery(callbackID, "text", false)
 	if err == nil {
-		t.Error("AnswerCallbackQuery() expected error for empty callback_query_id, got nil")
+		t.Error("AnswerCallbackQuery() expected error, got nil")
 	}
+}
+
+// TestAnswerCallbackQuery_WithEmptyID tests behavior with empty callback ID
+func TestAnswerCallbackQuery_WithEmptyID(t *testing.T) {
+	testAnswerCallbackQueryError(t, "", "Bad Request: query is empty")
 }
 
 // TestAnswerCallbackQuery_APIError tests API error handling
 func TestAnswerCallbackQuery_APIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Return HTTP error status
-		w.WriteHeader(http.StatusBadRequest)
-		response := map[string]interface{}{
-			"ok":          false,
-			"description": "Query is too old",
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	originalURL := apiBaseURL
-	apiBaseURL = server.URL + "/"
-	defer func() { apiBaseURL = originalURL }()
-
-	client := &Client{
-		botToken:   "test-token",
-		chatID:     "12345",
-		httpClient: &http.Client{},
-	}
-
-	err := client.AnswerCallbackQuery("old-callback", "text", false)
-	if err == nil {
-		t.Error("AnswerCallbackQuery() expected error, got nil")
-	}
+	testAnswerCallbackQueryError(t, "old-callback", "Query is too old")
 }
 
 // TestEditMessageText_Success tests successful message edit
