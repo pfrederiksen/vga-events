@@ -696,189 +696,19 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 
 	case "menu":
 		// Handle menu actions
-		switch param {
-		case "main":
-			responseText, keyboard = showMenuKeyboard()
-		case "all-events":
-			responseText, _ = handleAllEvents(prefs, chatID, botToken, dryRun, modified)
-		case "my-events":
-			responseText, _ = handleMyEvents(prefs, chatID, botToken, dryRun, modified)
-		case "upcoming":
-			responseText = handleUpcomingEventsCallback(prefs, chatID, botToken, dryRun)
-		case "reminders":
-			responseText, keyboard = showRemindersKeyboard(prefs, chatID)
-		case "search":
-			responseText = `🔍 <b>Search Events</b>
-
-To search for events, use the command:
-/search &lt;keyword&gt;
-
-Example:
-/search "Pine Valley"
-/search Championship
-/search Las Vegas`
-		case "help":
-			responseText = getHelpMessage()
-		default:
-			responseText = "Unknown menu action"
-		}
+		responseText, keyboard = handleMenuCallback(param, prefs, chatID, botToken, dryRun, modified)
 
 	case "status":
 		// Handle event status update
-		// Format: status:EVENT_ID:STATUS (e.g., "status:abc123:interested")
-		parts := strings.Split(callback.Data, ":")
-		if len(parts) != 3 {
-			responseText = "❌ Invalid status request"
-			break
-		}
-		eventID := parts[1]
-		status := parts[2]
-
-		user := prefs.GetUser(chatID)
-		if user.SetEventStatus(eventID, status) {
-			*modified = true
-
-			// Track stats: event marked with status
-			user.IncrementEventStatus(status)
-
-			// Get status emoji and text
-			statusEmoji := ""
-			statusText := ""
-			switch status {
-			case preferences.EventStatusInterested:
-				statusEmoji = "⭐"
-				statusText = "Interested"
-			case preferences.EventStatusRegistered:
-				statusEmoji = "✅"
-				statusText = "Registered"
-			case preferences.EventStatusMaybe:
-				statusEmoji = "🤔"
-				statusText = "Maybe"
-			case preferences.EventStatusSkip:
-				statusEmoji = "❌"
-				statusText = "Skipped"
-			}
-
-			responseText = fmt.Sprintf("%s Event marked as <b>%s</b>", statusEmoji, statusText)
-		} else {
-			responseText = "❌ Invalid status"
-		}
+		responseText = handleStatusCallback(callback.Data, prefs, chatID, modified)
 
 	case "reminder":
 		// Handle reminder configuration
-		// Format: reminder:ACTION:DAYS (e.g., "reminder:add:7" or "reminder:done:0")
-		parts := strings.Split(callback.Data, ":")
-		if len(parts) != 3 {
-			responseText = "❌ Invalid reminder request"
-			break
-		}
-		action := parts[1]
-		days := 0
-		_, _ = fmt.Sscanf(parts[2], "%d", &days) // Error ignored, days defaults to 0
-
-		user := prefs.GetUser(chatID)
-
-		switch action {
-		case "add":
-			// Add reminder day if not already present
-			if !user.HasReminderDay(days) {
-				user.ReminderDays = append(user.ReminderDays, days)
-				*modified = true
-			}
-			// Update keyboard to show new selection
-			responseText, keyboard = showRemindersKeyboard(prefs, chatID)
-
-		case "remove":
-			// Remove reminder day
-			newDays := []int{}
-			for _, d := range user.ReminderDays {
-				if d != days {
-					newDays = append(newDays, d)
-				}
-			}
-			user.ReminderDays = newDays
-			*modified = true
-			// Update keyboard to show new selection
-			responseText, keyboard = showRemindersKeyboard(prefs, chatID)
-
-		case "done":
-			// Save and close
-			responseText = "✅ Reminder settings saved!"
-			if len(user.ReminderDays) > 0 {
-				reminders := []string{}
-				for _, day := range user.ReminderDays {
-					switch day {
-					case 1:
-						reminders = append(reminders, "1 day")
-					case 3:
-						reminders = append(reminders, "3 days")
-					case 7:
-						reminders = append(reminders, "1 week")
-					case 14:
-						reminders = append(reminders, "2 weeks")
-					}
-				}
-				responseText += fmt.Sprintf("\n\nYou'll be reminded <b>%s</b> before events you've marked as ⭐ Interested or ✅ Registered.", strings.Join(reminders, ", "))
-			} else {
-				responseText += "\n\nNo reminders configured. Use /reminders to set them up."
-			}
-
-		default:
-			responseText = "❌ Unknown reminder action"
-		}
+		responseText, keyboard = handleReminderCallback(callback.Data, prefs, chatID, modified)
 
 	case "calendar":
 		// Calendar download - fetch event and send .ics file
-		eventID := param
-
-		// Fetch fresh events from VGA website to find the event
-		sc := scraper.New()
-		allEvents, err := sc.FetchEvents()
-		if err != nil {
-			responseText = "❌ Error fetching event data"
-			fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
-			break
-		}
-
-		// Find the event by ID
-		var evt *event.Event
-		for _, e := range allEvents {
-			if e.ID == eventID {
-				evt = e
-				break
-			}
-		}
-
-		if evt == nil {
-			responseText = "❌ Event not found. This event may have been removed from the VGA website."
-			fmt.Fprintf(os.Stderr, "Event %s not found in current events\n", eventID)
-			break
-		}
-
-		// Generate .ics file
-		icsContent := calendar.GenerateICS(evt)
-		filename := fmt.Sprintf("vga-event-%s.ics", evt.State)
-
-		// Send the .ics file
-		if !dryRun {
-			client, err := telegram.NewClient(botToken, chatID)
-			if err != nil {
-				responseText = errSendingCalendarFile
-				fmt.Fprintf(os.Stderr, "Error creating Telegram client: %v\n", err)
-				break
-			}
-
-			caption := fmt.Sprintf("📅 <b>%s - %s</b>\n\nTap to add to your calendar!", evt.State, evt.Title)
-			if err := client.SendDocument(filename, []byte(icsContent), caption); err != nil {
-				responseText = errSendingCalendarFile
-				fmt.Fprintf(os.Stderr, "Error sending document: %v\n", err)
-				break
-			}
-
-			responseText = "✅ Calendar file sent! Tap it to add the event to your calendar."
-		} else {
-			responseText = fmt.Sprintf("[DRY RUN] Would send .ics file for event: %s - %s", evt.State, evt.Title)
-		}
+		responseText = handleCalendarCallback(param, chatID, botToken, dryRun)
 
 	case "bulk":
 		// Handle bulk actions
@@ -934,6 +764,16 @@ func processCommand(prefs preferences.Preferences, chatID, text string, modified
 
 	command := strings.ToLower(parts[0])
 
+	// Try UI command dispatcher
+	if responseText, events, handled := processUICommand(command, prefs, chatID, botToken, dryRun); handled {
+		return responseText, events
+	}
+
+	// Try event command dispatcher
+	if responseText, events, handled := processEventCommand(command, prefs, chatID, botToken, dryRun, modified); handled {
+		return responseText, events
+	}
+
 	switch command {
 	case "/start", "/help":
 		// Check if user requested help for a specific command
@@ -960,18 +800,6 @@ func processCommand(prefs preferences.Preferences, chatID, text string, modified
 			return handleUnsubscribeAllWithKeyboard(prefs, chatID, botToken, dryRun)
 		}
 		return handleUnsubscribe(prefs, chatID, parts[1], modified), nil
-
-	case "/list":
-		return handleList(prefs, chatID), nil
-
-	case "/manage":
-		return handleManageWithKeyboard(prefs, chatID, botToken, dryRun)
-
-	case "/settings":
-		return handleSettingsWithKeyboard(prefs, chatID, botToken, dryRun)
-
-	case "/menu":
-		return handleMenuWithKeyboard(chatID, botToken, dryRun)
 
 	case "/search":
 		if len(parts) < 2 {
@@ -1005,12 +833,6 @@ Please provide a search keyword.
 			stateFilter = strings.ToUpper(strings.TrimSpace(parts[1]))
 		}
 		return handleExportCalendar(prefs, chatID, stateFilter, botToken, dryRun)
-
-	case "/my-events":
-		return handleMyEvents(prefs, chatID, botToken, dryRun, modified)
-
-	case "/events":
-		return handleAllEvents(prefs, chatID, botToken, dryRun, modified)
 
 	case "/note":
 		if len(parts) < 2 {
@@ -1070,51 +892,7 @@ Please provide a search keyword.
 
 	case "/bulk":
 		// Handle bulk operations with subcommands
-		if len(parts) < 2 {
-			// No subcommand - show keyboard menu
-			return handleBulkWithKeyboard(prefs, chatID, botToken, dryRun)
-		}
-
-		subcommand := strings.ToLower(parts[1])
-		switch subcommand {
-		case "register":
-			// /bulk register <event_ids>
-			if len(parts) < 3 {
-				return "❌ Please specify event IDs.\n\nUsage: /bulk register &lt;event_id1&gt; &lt;event_id2&gt; ...\nUsage: /bulk register &lt;event_id1,event_id2,...&gt;", nil
-			}
-			eventIDs := parseBulkEventIDs(parts[2:])
-			return handleBulkRegister(prefs, chatID, eventIDs, modified)
-
-		case "note":
-			// /bulk note <event_ids> <note_text>
-			if len(parts) < 4 {
-				return "❌ Please specify event IDs and note text.\n\nUsage: /bulk note &lt;event_id1,event_id2&gt; &lt;note_text&gt;", nil
-			}
-			// First part after "note" is event IDs (can be comma-separated or space-separated if quoted)
-			eventIDsPart := parts[2]
-			eventIDs := parseEventIDList(eventIDsPart)
-
-			// Rest is note text
-			noteText := strings.Join(parts[3:], " ")
-			noteText, errMsg := validateUserInput(noteText, 500, "Note text")
-			if errMsg != "" {
-				return errMsg, nil
-			}
-			return handleBulkNote(prefs, chatID, eventIDs, noteText, modified)
-
-		case "status":
-			// /bulk status <status> <event_ids>
-			if len(parts) < 4 {
-				return "❌ Please specify status and event IDs.\n\nUsage: /bulk status &lt;interested|registered|maybe|skip&gt; &lt;event_id1,event_id2&gt;", nil
-			}
-			status := strings.ToLower(parts[2])
-			eventIDsPart := parts[3]
-			eventIDs := parseEventIDList(eventIDsPart)
-			return handleBulkStatus(prefs, chatID, status, eventIDs, modified)
-
-		default:
-			return fmt.Sprintf("❌ Unknown bulk subcommand: %s\n\nAvailable: register, note, status\nOr use /bulk without parameters for menu.", subcommand), nil
-		}
+		return processBulkCommand(parts, prefs, chatID, modified, botToken, dryRun)
 	case "/stats":
 		// Optional parameter: week, month, all
 		period := "week"
@@ -1140,116 +918,7 @@ Please provide a search keyword.
 
 	case "/filter":
 		// Handle filter operations with subcommands
-		if len(parts) < 2 {
-			// No subcommand - show current filter status
-			return handleFilterStatus(prefs, chatID)
-		}
-
-		subcommand := strings.ToLower(parts[1])
-		switch subcommand {
-		case "date":
-			if len(parts) < 3 {
-				return `❌ Please specify a date range.
-
-Usage: /filter date "Mar 1-15"
-
-Examples:
-/filter date "Mar 1-15" - March 1 to 15
-/filter date "Mar 1 - Apr 15" - March 1 to April 15
-/filter date "March" - Entire month of March`, nil
-			}
-			dateRange := strings.Join(parts[2:], " ")
-			return handleFilterDate(prefs, chatID, dateRange, modified)
-
-		case "course":
-			if len(parts) < 3 {
-				return `❌ Please specify a course name.
-
-Usage: /filter course "Pebble Beach"
-
-Examples:
-/filter course "Pebble Beach"
-/filter course "Shadow Creek"`, nil
-			}
-			courseName := strings.Join(parts[2:], " ")
-			return handleFilterCourse(prefs, chatID, courseName, modified)
-
-		case "city":
-			if len(parts) < 3 {
-				return `❌ Please specify a city name.
-
-Usage: /filter city "Las Vegas"
-
-Examples:
-/filter city "Las Vegas"
-/filter city "San Diego"`, nil
-			}
-			cityName := strings.Join(parts[2:], " ")
-			return handleFilterCity(prefs, chatID, cityName, modified)
-
-		case "weekends":
-			return handleFilterWeekends(prefs, chatID, modified)
-
-		case "clear":
-			return handleFilterClear(prefs, chatID, modified)
-
-		case "save":
-			if len(parts) < 3 {
-				return `❌ Please specify a name for this filter.
-
-Usage: /filter save "My Weekend Events"
-
-Examples:
-/filter save "March Weekends"
-/filter save "Pebble Beach Events"`, nil
-			}
-			filterName := strings.Join(parts[2:], " ")
-			// Remove quotes if present
-			filterName = strings.Trim(filterName, "\"")
-			return handleFilterSave(prefs, chatID, filterName, modified)
-
-		case "load":
-			if len(parts) < 3 {
-				return `❌ Please specify the filter name to load.
-
-Usage: /filter load "My Weekend Events"
-
-Use /filters to see all saved filters.`, nil
-			}
-			filterName := strings.Join(parts[2:], " ")
-			// Remove quotes if present
-			filterName = strings.Trim(filterName, "\"")
-			return handleFilterLoad(prefs, chatID, filterName, modified)
-
-		case "delete":
-			if len(parts) < 3 {
-				return `❌ Please specify the filter name to delete.
-
-Usage: /filter delete "My Weekend Events"
-
-Use /filters to see all saved filters.`, nil
-			}
-			filterName := strings.Join(parts[2:], " ")
-			// Remove quotes if present
-			filterName = strings.Trim(filterName, "\"")
-			return handleFilterDelete(prefs, chatID, filterName, modified)
-
-		default:
-			return `❌ Unknown filter subcommand.
-
-Available subcommands:
-• /filter date "Mar 1-15" - Set date range
-• /filter course "Pebble Beach" - Filter by course
-• /filter city "Las Vegas" - Filter by city
-• /filter weekends - Toggle weekends-only
-• /filter save "name" - Save current filter
-• /filter load "name" - Load saved filter
-• /filter delete "name" - Delete saved filter
-• /filter clear - Remove active filter
-• /filter - Show current filter status
-
-Use /filters to list all saved filters.`, nil
-		}
+		return processFilterCommand(parts, prefs, chatID, modified)
 
 	case "/filters":
 		return handleFiltersList(prefs, chatID)
@@ -2141,18 +1810,7 @@ func handleStats(prefs preferences.Preferences, chatID, period string) string {
 	// Events marked by status
 	if len(stats.EventsMarked) > 0 {
 		msg.WriteString("\n<b>Events Marked:</b>\n")
-		if count, ok := stats.EventsMarked[preferences.EventStatusInterested]; ok && count > 0 {
-			msg.WriteString(fmt.Sprintf("  ⭐ Interested: %d\n", count))
-		}
-		if count, ok := stats.EventsMarked[preferences.EventStatusRegistered]; ok && count > 0 {
-			msg.WriteString(fmt.Sprintf("  ✅ Registered: %d\n", count))
-		}
-		if count, ok := stats.EventsMarked[preferences.EventStatusMaybe]; ok && count > 0 {
-			msg.WriteString(fmt.Sprintf("  🤔 Maybe: %d\n", count))
-		}
-		if count, ok := stats.EventsMarked[preferences.EventStatusSkip]; ok && count > 0 {
-			msg.WriteString(fmt.Sprintf("  ❌ Skipped: %d\n", count))
-		}
+		formatStatusCounts(&msg, stats.EventsMarked)
 	}
 
 	// Total marked

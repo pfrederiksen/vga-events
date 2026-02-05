@@ -139,47 +139,18 @@ func (f *Filter) Matches(evt *event.Event) bool {
 	}
 
 	// Check course name (case-insensitive substring match)
-	if len(f.Courses) > 0 {
-		matched := false
-		titleLower := strings.ToLower(evt.Title)
-		for _, course := range f.Courses {
-			if strings.Contains(titleLower, strings.ToLower(course)) {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return false
-		}
+	if !matchesAnySubstring(evt.Title, f.Courses) {
+		return false
 	}
 
-	// Check state filtering
-	if len(f.States) > 0 {
-		matched := false
-		for _, state := range f.States {
-			if strings.EqualFold(evt.State, state) {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return false
-		}
+	// Check state filtering (case-insensitive exact match)
+	if !matchesAnyExact(evt.State, f.States) {
+		return false
 	}
 
 	// Check city filtering (case-insensitive substring match)
-	if len(f.Cities) > 0 {
-		matched := false
-		cityLower := strings.ToLower(evt.City)
-		for _, city := range f.Cities {
-			if strings.Contains(cityLower, strings.ToLower(city)) {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return false
-		}
+	if !matchesAnySubstring(evt.City, f.Cities) {
+		return false
 	}
 
 	// Check max price (placeholder for future implementation)
@@ -335,4 +306,35 @@ func (f *Filter) Clone() *Filter {
 	}
 
 	return clone
+}
+
+// matchesAnySubstring checks if value contains any of the terms (case-insensitive).
+// Returns true if terms is empty or if value matches any term.
+func matchesAnySubstring(value string, terms []string) bool {
+	if len(terms) == 0 {
+		return true
+	}
+
+	valueLower := strings.ToLower(value)
+	for _, term := range terms {
+		if strings.Contains(valueLower, strings.ToLower(term)) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesAnyExact checks if value exactly matches any of the terms (case-insensitive).
+// Returns true if terms is empty or if value matches any term.
+func matchesAnyExact(value string, terms []string) bool {
+	if len(terms) == 0 {
+		return true
+	}
+
+	for _, term := range terms {
+		if strings.EqualFold(value, term) {
+			return true
+		}
+	}
+	return false
 }

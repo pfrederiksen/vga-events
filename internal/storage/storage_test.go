@@ -171,6 +171,20 @@ func eventsEqual(a, b *event.Event) bool {
 		a.SourceURL == b.SourceURL
 }
 
+// validateSingleEventSnapshot validates that a snapshot contains exactly one event with the given ID
+func validateSingleEventSnapshot(t *testing.T, storage *Storage, state, eventID string) {
+	snapshot, err := storage.LoadSnapshot(state)
+	if err != nil {
+		t.Fatalf("Failed to load snapshot: %v", err)
+	}
+	if len(snapshot.Events) != 1 {
+		t.Errorf("Snapshot has %d events, want 1", len(snapshot.Events))
+	}
+	if snapshot.Events[eventID] == nil {
+		t.Errorf("Event %s not found in snapshot", eventID)
+	}
+}
+
 func TestGetEventByID_StateSpecificFallback(t *testing.T) {
 	// Create a temporary directory for test snapshots
 	tmpDir, err := os.MkdirTemp("", "storage-test-fallback-*")
@@ -224,4 +238,238 @@ func TestGetEventByID_StateSpecificFallback(t *testing.T) {
 		// This documents that the current implementation only checks "all" snapshot
 		// Future enhancement could search state-specific snapshots
 	})
+}
+
+func TestCreateSnapshotFromEvents(t *testing.T) {
+	// Create a temporary directory for test snapshots
+	tmpDir, err := os.MkdirTemp("", "storage-test-create-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to clean up temp dir: %v", err)
+		}
+	}()
+
+	// Create storage instance
+	storage, err := New(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		events   []*event.Event
+		state    string
+		wantErr  bool
+		validate func(t *testing.T, storage *Storage, state string)
+	}{
+		{
+			name: "Create snapshot from event list",
+			events: []*event.Event{
+				{
+					ID:        "evt-001",
+					State:     "NV",
+					Title:     "Test Event 1",
+					DateText:  "Mar 15 2026",
+					City:      "Las Vegas",
+					SourceURL: "https://example.com/1",
+					FirstSeen: time.Now(),
+				},
+				{
+					ID:        "evt-002",
+					State:     "NV",
+					Title:     "Test Event 2",
+					DateText:  "Apr 20 2026",
+					City:      "Reno",
+					SourceURL: "https://example.com/2",
+					FirstSeen: time.Now(),
+				},
+			},
+			state:   "all",
+			wantErr: false,
+			validate: func(t *testing.T, storage *Storage, state string) {
+				snapshot, err := storage.LoadSnapshot(state)
+				if err != nil {
+					t.Fatalf("Failed to load snapshot: %v", err)
+				}
+				if len(snapshot.Events) != 2 {
+					t.Errorf("Snapshot has %d events, want 2", len(snapshot.Events))
+				}
+				if snapshot.Events["evt-001"] == nil {
+					t.Error("Event evt-001 not found in snapshot")
+				}
+				if snapshot.Events["evt-002"] == nil {
+					t.Error("Event evt-002 not found in snapshot")
+				}
+			},
+		},
+		{
+			name: "Create snapshot for specific state",
+			events: []*event.Event{
+				{
+					ID:        "ca-evt-001",
+					State:     "CA",
+					Title:     "California Event",
+					DateText:  "May 10 2026",
+					City:      "San Francisco",
+					SourceURL: "https://example.com/ca1",
+					FirstSeen: time.Now(),
+				},
+			},
+			state:   "CA",
+			wantErr: false,
+			validate: func(t *testing.T, storage *Storage, state string) {
+				validateSingleEventSnapshot(t, storage, state, "ca-evt-001")
+			},
+		},
+		{
+			name:    "Create empty snapshot",
+			events:  []*event.Event{},
+			state:   "all",
+			wantErr: false,
+			validate: func(t *testing.T, storage *Storage, state string) {
+				snapshot, err := storage.LoadSnapshot(state)
+				if err != nil {
+					t.Fatalf("Failed to load snapshot: %v", err)
+				}
+				if len(snapshot.Events) != 0 {
+					t.Errorf("Snapshot has %d events, want 0", len(snapshot.Events))
+				}
+			},
+		},
+		{
+			name: "Overwrite existing snapshot",
+			events: []*event.Event{
+				{
+					ID:        "new-evt-001",
+					State:     "TX",
+					Title:     "New Event",
+					DateText:  "Jun 1 2026",
+					City:      "Austin",
+					SourceURL: "https://example.com/new",
+					FirstSeen: time.Now(),
+				},
+			},
+			state:   "all",
+			wantErr: false,
+			validate: func(t *testing.T, storage *Storage, state string) {
+				// Should only have 1 event (overwrites previous snapshot)
+				validateSingleEventSnapshot(t, storage, state, "new-evt-001")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := storage.CreateSnapshotFromEvents(tt.events, tt.state)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CreateSnapshotFromEvents() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr && tt.validate != nil {
+				tt.validate(t, storage, tt.state)
+			}
+		})
+	}
+}
+
+func TestNew(t *testing.T) {
+	tests := []struct {
+		name     string
+		dataDir  string
+		setup    func(t *testing.T) string // Returns actual path to use
+		wantErr  bool
+		validate func(t *testing.T, storage *Storage, dataDir string)
+	}{
+		{
+			name: "Create storage with absolute path",
+			setup: func(t *testing.T) string {
+				tmpDir, err := os.MkdirTemp("", "storage-new-test-*")
+				if err != nil {
+					t.Fatalf("Failed to create temp dir: %v", err)
+				}
+				t.Cleanup(func() {
+					_ = os.RemoveAll(tmpDir)
+				})
+				return tmpDir
+			},
+			wantErr: false,
+			validate: func(t *testing.T, storage *Storage, dataDir string) {
+				if storage == nil {
+					t.Fatal("Storage is nil")
+				}
+				if storage.dataDir != dataDir {
+					t.Errorf("Storage.dataDir = %q, want %q", storage.dataDir, dataDir)
+				}
+				// Verify directory exists
+				if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+					t.Error("Data directory was not created")
+				}
+			},
+		},
+		{
+			name: "Create storage creates nested directories",
+			setup: func(t *testing.T) string {
+				tmpDir, err := os.MkdirTemp("", "storage-new-nested-*")
+				if err != nil {
+					t.Fatalf("Failed to create temp dir: %v", err)
+				}
+				t.Cleanup(func() {
+					_ = os.RemoveAll(tmpDir)
+				})
+				return filepath.Join(tmpDir, "nested", "path", "data")
+			},
+			wantErr: false,
+			validate: func(t *testing.T, storage *Storage, dataDir string) {
+				if storage == nil {
+					t.Fatal("Storage is nil")
+				}
+				// Verify nested directory was created
+				if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+					t.Error("Nested data directory was not created")
+				}
+			},
+		},
+		{
+			name: "Create storage with existing directory",
+			setup: func(t *testing.T) string {
+				tmpDir, err := os.MkdirTemp("", "storage-new-existing-*")
+				if err != nil {
+					t.Fatalf("Failed to create temp dir: %v", err)
+				}
+				t.Cleanup(func() {
+					_ = os.RemoveAll(tmpDir)
+				})
+				// Directory already exists
+				return tmpDir
+			},
+			wantErr: false,
+			validate: func(t *testing.T, storage *Storage, dataDir string) {
+				if storage == nil {
+					t.Fatal("Storage is nil")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dataDir := tt.setup(t)
+
+			storage, err := New(dataDir)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("New() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr && tt.validate != nil {
+				tt.validate(t, storage, dataDir)
+			}
+		})
+	}
 }

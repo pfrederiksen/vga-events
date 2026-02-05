@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-const (
-	apiBaseURL = "https://api.telegram.org/bot"
-	timeout    = 10 * time.Second
-)
+const timeout = 10 * time.Second
+
+// apiBaseURL is a package variable (not const) to allow test overriding
+var apiBaseURL = "https://api.telegram.org/bot"
 
 // InlineKeyboardButton represents a button in an inline keyboard
 type InlineKeyboardButton struct {
