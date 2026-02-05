@@ -58,7 +58,44 @@ Welcome to the VGA Events Bot project documentation. This interactive Telegram b
 
 ## Quick Reference
 
-### Common Commands
+### Bot Commands
+
+**Essential:**
+- `/start` - Start the bot
+- `/help` - Show help message
+- `/subscribe <STATE>` - Subscribe to a state
+- `/unsubscribe <STATE>` - Unsubscribe from a state
+- `/check` - Check for new events now
+
+**Event Discovery:**
+- `/search <keyword>` - Search events
+- `/near <city>` - Find events near a city
+- `/export-calendar` - Download .ics calendar file
+
+**Event Tracking:**
+- `/note <event_id> <text>` - Add note to event
+- `/notes` - List events with notes
+
+**Event Filtering:**
+- `/filter` - Show filter menu
+- `/filters` - List saved filters
+
+**Bulk Operations:**
+- `/bulk` - Bulk operations menu
+
+**Notifications:**
+- `/reminders` - Configure event reminders
+- `/notify-removals on|off` - Toggle removal notifications
+
+**Statistics & Social:**
+- `/stats` - View activity statistics
+- `/invite` - Generate invite code
+- `/join <code>` - Join using invite code
+- `/friends` - View friends list
+
+See [TELEGRAM_BOT.md](docs/TELEGRAM_BOT.md#bot-commands) for complete command documentation.
+
+### Common Development Commands
 
 ```bash
 # Development
