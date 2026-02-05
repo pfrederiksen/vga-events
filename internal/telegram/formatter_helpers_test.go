@@ -87,11 +87,11 @@ func TestFormatChangeValue(t *testing.T) {
 // TestFormatEventHeader tests the formatEventHeader helper function
 func TestFormatEventHeader(t *testing.T) {
 	tests := []struct {
-		name     string
-		event    *event.Event
-		hasNote  bool
+		name       string
+		event      *event.Event
+		hasNote    bool
 		wantEmojis []string
-		wantText []string
+		wantText   []string
 	}{
 		{
 			name: "event with note",
@@ -102,7 +102,7 @@ func TestFormatEventHeader(t *testing.T) {
 				City:     "Las Vegas",
 				AlsoIn:   []string{},
 			},
-			hasNote: true,
+			hasNote:    true,
 			wantEmojis: []string{"🏌️", "📝"},
 			wantText: []string{
 				"New VGA Golf Event!",
@@ -121,7 +121,7 @@ func TestFormatEventHeader(t *testing.T) {
 				City:     "Monterey",
 				AlsoIn:   []string{},
 			},
-			hasNote: false,
+			hasNote:    false,
 			wantEmojis: []string{"🏌️"},
 			wantText: []string{
 				"New VGA Golf Event!",
@@ -140,7 +140,7 @@ func TestFormatEventHeader(t *testing.T) {
 				City:     "Las Vegas",
 				AlsoIn:   []string{"CA", "AZ"},
 			},
-			hasNote: false,
+			hasNote:    false,
 			wantEmojis: []string{"🏌️"},
 			wantText: []string{
 				"New VGA Golf Event!",
@@ -158,7 +158,7 @@ func TestFormatEventHeader(t *testing.T) {
 				City:     "Dallas",
 				AlsoIn:   []string{},
 			},
-			hasNote: false,
+			hasNote:    false,
 			wantEmojis: []string{"🏌️"},
 			wantText: []string{
 				"TX",
@@ -175,7 +175,7 @@ func TestFormatEventHeader(t *testing.T) {
 				City:     "",
 				AlsoIn:   []string{},
 			},
-			hasNote: false,
+			hasNote:    false,
 			wantEmojis: []string{"🏌️"},
 			wantText: []string{
 				"AZ",
@@ -219,38 +219,38 @@ func TestFormatYardageEdgeCases(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		yardage      int
+		name          string
+		yardage       int
 		wantFormatted string
 	}{
 		{
-			name:         "yardage with comma (4 digits)",
-			yardage:      7041,
+			name:          "yardage with comma (4 digits)",
+			yardage:       7041,
 			wantFormatted: "7,041",
 		},
 		{
-			name:         "yardage with comma (5 digits)",
-			yardage:      10234,
+			name:          "yardage with comma (5 digits)",
+			yardage:       10234,
 			wantFormatted: "10,234",
 		},
 		{
-			name:         "yardage without comma (3 digits)",
-			yardage:      950,
+			name:          "yardage without comma (3 digits)",
+			yardage:       950,
 			wantFormatted: "950",
 		},
 		{
-			name:         "yardage without comma (2 digits)",
-			yardage:      50,
+			name:          "yardage without comma (2 digits)",
+			yardage:       50,
 			wantFormatted: "50",
 		},
 		{
-			name:         "yardage without comma (1 digit)",
-			yardage:      5,
+			name:          "yardage without comma (1 digit)",
+			yardage:       5,
 			wantFormatted: "5",
 		},
 		{
-			name:         "zero yardage",
-			yardage:      0,
+			name:          "zero yardage",
+			yardage:       0,
 			wantFormatted: "0",
 		},
 	}
@@ -288,11 +288,11 @@ func TestFormatEventWithStatusAndCourseEdgeCases(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		course        *CourseDetails
-		status        string
-		note          string
-		wantContains  []string
+		name           string
+		course         *CourseDetails
+		status         string
+		note           string
+		wantContains   []string
 		wantNotContain []string
 	}{
 		{
