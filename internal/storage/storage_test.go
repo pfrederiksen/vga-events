@@ -245,11 +245,11 @@ func TestCreateSnapshotFromEvents(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		events    []*event.Event
-		state     string
-		wantErr   bool
-		validate  func(t *testing.T, storage *Storage, state string)
+		name     string
+		events   []*event.Event
+		state    string
+		wantErr  bool
+		validate func(t *testing.T, storage *Storage, state string)
 	}{
 		{
 			name: "Create snapshot from event list",
@@ -292,7 +292,7 @@ func TestCreateSnapshotFromEvents(t *testing.T) {
 			},
 		},
 		{
-			name:    "Create snapshot for specific state",
+			name: "Create snapshot for specific state",
 			events: []*event.Event{
 				{
 					ID:        "ca-evt-001",
@@ -383,21 +383,21 @@ func TestCreateSnapshotFromEvents(t *testing.T) {
 
 func TestNew(t *testing.T) {
 	tests := []struct {
-		name      string
-		dataDir   string
-		setup     func(t *testing.T) string // Returns actual path to use
-		wantErr   bool
-		validate  func(t *testing.T, storage *Storage, dataDir string)
+		name     string
+		dataDir  string
+		setup    func(t *testing.T) string // Returns actual path to use
+		wantErr  bool
+		validate func(t *testing.T, storage *Storage, dataDir string)
 	}{
 		{
-			name:    "Create storage with absolute path",
+			name: "Create storage with absolute path",
 			setup: func(t *testing.T) string {
 				tmpDir, err := os.MkdirTemp("", "storage-new-test-*")
 				if err != nil {
 					t.Fatalf("Failed to create temp dir: %v", err)
 				}
 				t.Cleanup(func() {
-					os.RemoveAll(tmpDir)
+					_ = os.RemoveAll(tmpDir)
 				})
 				return tmpDir
 			},
@@ -416,14 +416,14 @@ func TestNew(t *testing.T) {
 			},
 		},
 		{
-			name:    "Create storage creates nested directories",
+			name: "Create storage creates nested directories",
 			setup: func(t *testing.T) string {
 				tmpDir, err := os.MkdirTemp("", "storage-new-nested-*")
 				if err != nil {
 					t.Fatalf("Failed to create temp dir: %v", err)
 				}
 				t.Cleanup(func() {
-					os.RemoveAll(tmpDir)
+					_ = os.RemoveAll(tmpDir)
 				})
 				return filepath.Join(tmpDir, "nested", "path", "data")
 			},
@@ -439,14 +439,14 @@ func TestNew(t *testing.T) {
 			},
 		},
 		{
-			name:    "Create storage with existing directory",
+			name: "Create storage with existing directory",
 			setup: func(t *testing.T) string {
 				tmpDir, err := os.MkdirTemp("", "storage-new-existing-*")
 				if err != nil {
 					t.Fatalf("Failed to create temp dir: %v", err)
 				}
 				t.Cleanup(func() {
-					os.RemoveAll(tmpDir)
+					_ = os.RemoveAll(tmpDir)
 				})
 				// Directory already exists
 				return tmpDir
