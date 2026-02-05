@@ -696,174 +696,19 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 
 	case "menu":
 		// Handle menu actions
-		switch param {
-		case "main":
-			responseText, keyboard = showMenuKeyboard()
-		case "all-events":
-			responseText, _ = handleAllEvents(prefs, chatID, botToken, dryRun, modified)
-		case "my-events":
-			responseText, _ = handleMyEvents(prefs, chatID, botToken, dryRun, modified)
-		case "upcoming":
-			responseText = handleUpcomingEventsCallback(prefs, chatID, botToken, dryRun)
-		case "reminders":
-			responseText, keyboard = showRemindersKeyboard(prefs, chatID)
-		case "search":
-			responseText = `🔍 <b>Search Events</b>
-
-To search for events, use the command:
-/search &lt;keyword&gt;
-
-Example:
-/search "Pine Valley"
-/search Championship
-/search Las Vegas`
-		case "help":
-			responseText = getHelpMessage()
-		default:
-			responseText = "Unknown menu action"
-		}
+		responseText, keyboard = handleMenuCallback(param, prefs, chatID, botToken, dryRun, modified)
 
 	case "status":
 		// Handle event status update
-		// Format: status:EVENT_ID:STATUS (e.g., "status:abc123:interested")
-		parts := strings.Split(callback.Data, ":")
-		if len(parts) != 3 {
-			responseText = "❌ Invalid status request"
-			break
-		}
-		eventID := parts[1]
-		status := parts[2]
-
-		user := prefs.GetUser(chatID)
-		if user.SetEventStatus(eventID, status) {
-			*modified = true
-
-			// Track stats: event marked with status
-			user.IncrementEventStatus(status)
-
-			// Get status emoji and text
-			statusEmoji, statusText := getStatusDisplay(status)
-
-			responseText = fmt.Sprintf("%s Event marked as <b>%s</b>", statusEmoji, statusText)
-		} else {
-			responseText = "❌ Invalid status"
-		}
+		responseText = handleStatusCallback(callback.Data, prefs, chatID, modified)
 
 	case "reminder":
 		// Handle reminder configuration
-		// Format: reminder:ACTION:DAYS (e.g., "reminder:add:7" or "reminder:done:0")
-		parts := strings.Split(callback.Data, ":")
-		if len(parts) != 3 {
-			responseText = "❌ Invalid reminder request"
-			break
-		}
-		action := parts[1]
-		days := 0
-		_, _ = fmt.Sscanf(parts[2], "%d", &days) // Error ignored, days defaults to 0
-
-		user := prefs.GetUser(chatID)
-
-		switch action {
-		case "add":
-			// Add reminder day if not already present
-			if !user.HasReminderDay(days) {
-				user.ReminderDays = append(user.ReminderDays, days)
-				*modified = true
-			}
-			// Update keyboard to show new selection
-			responseText, keyboard = showRemindersKeyboard(prefs, chatID)
-
-		case "remove":
-			// Remove reminder day
-			newDays := []int{}
-			for _, d := range user.ReminderDays {
-				if d != days {
-					newDays = append(newDays, d)
-				}
-			}
-			user.ReminderDays = newDays
-			*modified = true
-			// Update keyboard to show new selection
-			responseText, keyboard = showRemindersKeyboard(prefs, chatID)
-
-		case "done":
-			// Save and close
-			responseText = "✅ Reminder settings saved!"
-			if len(user.ReminderDays) > 0 {
-				reminders := []string{}
-				for _, day := range user.ReminderDays {
-					switch day {
-					case 1:
-						reminders = append(reminders, "1 day")
-					case 3:
-						reminders = append(reminders, "3 days")
-					case 7:
-						reminders = append(reminders, "1 week")
-					case 14:
-						reminders = append(reminders, "2 weeks")
-					}
-				}
-				responseText += fmt.Sprintf("\n\nYou'll be reminded <b>%s</b> before events you've marked as ⭐ Interested or ✅ Registered.", strings.Join(reminders, ", "))
-			} else {
-				responseText += "\n\nNo reminders configured. Use /reminders to set them up."
-			}
-
-		default:
-			responseText = "❌ Unknown reminder action"
-		}
+		responseText, keyboard = handleReminderCallback(callback.Data, prefs, chatID, modified)
 
 	case "calendar":
 		// Calendar download - fetch event and send .ics file
-		eventID := param
-
-		// Fetch fresh events from VGA website to find the event
-		sc := scraper.New()
-		allEvents, err := sc.FetchEvents()
-		if err != nil {
-			responseText = "❌ Error fetching event data"
-			fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
-			break
-		}
-
-		// Find the event by ID
-		var evt *event.Event
-		for _, e := range allEvents {
-			if e.ID == eventID {
-				evt = e
-				break
-			}
-		}
-
-		if evt == nil {
-			responseText = "❌ Event not found. This event may have been removed from the VGA website."
-			fmt.Fprintf(os.Stderr, "Event %s not found in current events\n", eventID)
-			break
-		}
-
-		// Generate .ics file
-		icsContent := calendar.GenerateICS(evt)
-		filename := fmt.Sprintf("vga-event-%s.ics", evt.State)
-
-		// Send the .ics file
-		if !dryRun {
-			client, err := telegram.NewClient(botToken, chatID)
-			if err != nil {
-				responseText = errSendingCalendarFile
-				fmt.Fprintf(os.Stderr, "Error creating Telegram client: %v\n", err)
-				break
-			}
-
-			caption := fmt.Sprintf("📅 <b>%s - %s</b>\n\nTap to add to your calendar!", evt.State, evt.Title)
-			if err := client.SendDocument(filename, []byte(icsContent), caption); err != nil {
-				responseText = errSendingCalendarFile
-				fmt.Fprintf(os.Stderr, "Error sending document: %v\n", err)
-				break
-			}
-
-			responseText = "✅ Calendar file sent! Tap it to add the event to your calendar."
-		} else {
-			responseText = fmt.Sprintf("[DRY RUN] Would send .ics file for event: %s - %s", evt.State, evt.Title)
-		}
+		responseText = handleCalendarCallback(param, chatID, botToken, dryRun)
 
 	case "bulk":
 		// Handle bulk actions
@@ -919,6 +764,16 @@ func processCommand(prefs preferences.Preferences, chatID, text string, modified
 
 	command := strings.ToLower(parts[0])
 
+	// Try UI command dispatcher
+	if responseText, events, handled := processUICommand(command, prefs, chatID, botToken, dryRun); handled {
+		return responseText, events
+	}
+
+	// Try event command dispatcher
+	if responseText, events, handled := processEventCommand(command, prefs, chatID, botToken, dryRun, modified); handled {
+		return responseText, events
+	}
+
 	switch command {
 	case "/start", "/help":
 		// Check if user requested help for a specific command
@@ -946,17 +801,6 @@ func processCommand(prefs preferences.Preferences, chatID, text string, modified
 		}
 		return handleUnsubscribe(prefs, chatID, parts[1], modified), nil
 
-	case "/list":
-		return handleList(prefs, chatID), nil
-
-	case "/manage":
-		return handleManageWithKeyboard(prefs, chatID, botToken, dryRun)
-
-	case "/settings":
-		return handleSettingsWithKeyboard(prefs, chatID, botToken, dryRun)
-
-	case "/menu":
-		return handleMenuWithKeyboard(chatID, botToken, dryRun)
 
 	case "/search":
 		if len(parts) < 2 {
@@ -991,11 +835,6 @@ Please provide a search keyword.
 		}
 		return handleExportCalendar(prefs, chatID, stateFilter, botToken, dryRun)
 
-	case "/my-events":
-		return handleMyEvents(prefs, chatID, botToken, dryRun, modified)
-
-	case "/events":
-		return handleAllEvents(prefs, chatID, botToken, dryRun, modified)
 
 	case "/note":
 		if len(parts) < 2 {
