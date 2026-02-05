@@ -187,22 +187,7 @@ func handleBulkStatus(prefs preferences.Preferences, chatID, status string, even
 	}
 
 	// Get status emoji and text
-	statusEmoji := ""
-	statusText := ""
-	switch status {
-	case preferences.EventStatusInterested:
-		statusEmoji = "⭐"
-		statusText = "Interested"
-	case preferences.EventStatusRegistered:
-		statusEmoji = "✅"
-		statusText = "Registered"
-	case preferences.EventStatusMaybe:
-		statusEmoji = "🤔"
-		statusText = "Maybe"
-	case preferences.EventStatusSkip:
-		statusEmoji = "❌"
-		statusText = "Skipped"
-	}
+	statusEmoji, statusText := getStatusDisplay(status)
 
 	// Build response message
 	var response strings.Builder

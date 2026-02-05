@@ -35,31 +35,8 @@ func FormatEvent(evt *event.Event) string {
 func FormatEventWithNote(evt *event.Event, note string) string {
 	var msg strings.Builder
 
-	// Header with emoji (include 📝 if note exists)
-	if note != "" {
-		msg.WriteString("🏌️ 📝 <b>New VGA Golf Event!</b>\n\n")
-	} else {
-		msg.WriteString("🏌️ <b>New VGA Golf Event!</b>\n\n")
-	}
-
-	// State and course
-	msg.WriteString(fmt.Sprintf("📍 <b>%s</b> - %s\n", evt.State, evt.Title))
-
-	// Show if event appears in other states (deduplication)
-	if len(evt.AlsoIn) > 0 {
-		msg.WriteString(fmt.Sprintf("   <i>Also in: %s</i>\n", strings.Join(evt.AlsoIn, ", ")))
-	}
-
-	// Date (if available) - use enhanced formatting
-	if evt.DateText != "" {
-		niceDate := event.FormatDateNice(evt.DateText)
-		msg.WriteString(fmt.Sprintf("📅 %s\n", niceDate))
-	}
-
-	// City (if available)
-	if evt.City != "" {
-		msg.WriteString(fmt.Sprintf("🏢 %s\n", evt.City))
-	}
+	// Format common event header
+	formatEventHeader(&msg, evt, note != "")
 
 	// Note (if available)
 	if note != "" {
@@ -81,31 +58,8 @@ func FormatEventWithNote(evt *event.Event, note string) string {
 func FormatEventWithCourse(evt *event.Event, course *CourseDetails, note string) string {
 	var msg strings.Builder
 
-	// Header with emoji (include 📝 if note exists)
-	if note != "" {
-		msg.WriteString("🏌️ 📝 <b>New VGA Golf Event!</b>\n\n")
-	} else {
-		msg.WriteString("🏌️ <b>New VGA Golf Event!</b>\n\n")
-	}
-
-	// State and course
-	msg.WriteString(fmt.Sprintf("📍 <b>%s</b> - %s\n", evt.State, evt.Title))
-
-	// Show if event appears in other states (deduplication)
-	if len(evt.AlsoIn) > 0 {
-		msg.WriteString(fmt.Sprintf("   <i>Also in: %s</i>\n", strings.Join(evt.AlsoIn, ", ")))
-	}
-
-	// Date (if available) - use enhanced formatting
-	if evt.DateText != "" {
-		niceDate := event.FormatDateNice(evt.DateText)
-		msg.WriteString(fmt.Sprintf("📅 %s\n", niceDate))
-	}
-
-	// City (if available)
-	if evt.City != "" {
-		msg.WriteString(fmt.Sprintf("🏢 %s\n", evt.City))
-	}
+	// Format common event header
+	formatEventHeader(&msg, evt, note != "")
 
 	// Course details (if available)
 	if course != nil && len(course.Tees) > 0 {

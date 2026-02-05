@@ -742,22 +742,7 @@ Example:
 			user.IncrementEventStatus(status)
 
 			// Get status emoji and text
-			statusEmoji := ""
-			statusText := ""
-			switch status {
-			case preferences.EventStatusInterested:
-				statusEmoji = "⭐"
-				statusText = "Interested"
-			case preferences.EventStatusRegistered:
-				statusEmoji = "✅"
-				statusText = "Registered"
-			case preferences.EventStatusMaybe:
-				statusEmoji = "🤔"
-				statusText = "Maybe"
-			case preferences.EventStatusSkip:
-				statusEmoji = "❌"
-				statusText = "Skipped"
-			}
+			statusEmoji, statusText := getStatusDisplay(status)
 
 			responseText = fmt.Sprintf("%s Event marked as <b>%s</b>", statusEmoji, statusText)
 		} else {
@@ -1070,51 +1055,7 @@ Please provide a search keyword.
 
 	case "/bulk":
 		// Handle bulk operations with subcommands
-		if len(parts) < 2 {
-			// No subcommand - show keyboard menu
-			return handleBulkWithKeyboard(prefs, chatID, botToken, dryRun)
-		}
-
-		subcommand := strings.ToLower(parts[1])
-		switch subcommand {
-		case "register":
-			// /bulk register <event_ids>
-			if len(parts) < 3 {
-				return "❌ Please specify event IDs.\n\nUsage: /bulk register &lt;event_id1&gt; &lt;event_id2&gt; ...\nUsage: /bulk register &lt;event_id1,event_id2,...&gt;", nil
-			}
-			eventIDs := parseBulkEventIDs(parts[2:])
-			return handleBulkRegister(prefs, chatID, eventIDs, modified)
-
-		case "note":
-			// /bulk note <event_ids> <note_text>
-			if len(parts) < 4 {
-				return "❌ Please specify event IDs and note text.\n\nUsage: /bulk note &lt;event_id1,event_id2&gt; &lt;note_text&gt;", nil
-			}
-			// First part after "note" is event IDs (can be comma-separated or space-separated if quoted)
-			eventIDsPart := parts[2]
-			eventIDs := parseEventIDList(eventIDsPart)
-
-			// Rest is note text
-			noteText := strings.Join(parts[3:], " ")
-			noteText, errMsg := validateUserInput(noteText, 500, "Note text")
-			if errMsg != "" {
-				return errMsg, nil
-			}
-			return handleBulkNote(prefs, chatID, eventIDs, noteText, modified)
-
-		case "status":
-			// /bulk status <status> <event_ids>
-			if len(parts) < 4 {
-				return "❌ Please specify status and event IDs.\n\nUsage: /bulk status &lt;interested|registered|maybe|skip&gt; &lt;event_id1,event_id2&gt;", nil
-			}
-			status := strings.ToLower(parts[2])
-			eventIDsPart := parts[3]
-			eventIDs := parseEventIDList(eventIDsPart)
-			return handleBulkStatus(prefs, chatID, status, eventIDs, modified)
-
-		default:
-			return fmt.Sprintf("❌ Unknown bulk subcommand: %s\n\nAvailable: register, note, status\nOr use /bulk without parameters for menu.", subcommand), nil
-		}
+		return processBulkCommand(parts, prefs, chatID, modified, botToken, dryRun)
 	case "/stats":
 		// Optional parameter: week, month, all
 		period := "week"
@@ -1140,116 +1081,7 @@ Please provide a search keyword.
 
 	case "/filter":
 		// Handle filter operations with subcommands
-		if len(parts) < 2 {
-			// No subcommand - show current filter status
-			return handleFilterStatus(prefs, chatID)
-		}
-
-		subcommand := strings.ToLower(parts[1])
-		switch subcommand {
-		case "date":
-			if len(parts) < 3 {
-				return `❌ Please specify a date range.
-
-Usage: /filter date "Mar 1-15"
-
-Examples:
-/filter date "Mar 1-15" - March 1 to 15
-/filter date "Mar 1 - Apr 15" - March 1 to April 15
-/filter date "March" - Entire month of March`, nil
-			}
-			dateRange := strings.Join(parts[2:], " ")
-			return handleFilterDate(prefs, chatID, dateRange, modified)
-
-		case "course":
-			if len(parts) < 3 {
-				return `❌ Please specify a course name.
-
-Usage: /filter course "Pebble Beach"
-
-Examples:
-/filter course "Pebble Beach"
-/filter course "Shadow Creek"`, nil
-			}
-			courseName := strings.Join(parts[2:], " ")
-			return handleFilterCourse(prefs, chatID, courseName, modified)
-
-		case "city":
-			if len(parts) < 3 {
-				return `❌ Please specify a city name.
-
-Usage: /filter city "Las Vegas"
-
-Examples:
-/filter city "Las Vegas"
-/filter city "San Diego"`, nil
-			}
-			cityName := strings.Join(parts[2:], " ")
-			return handleFilterCity(prefs, chatID, cityName, modified)
-
-		case "weekends":
-			return handleFilterWeekends(prefs, chatID, modified)
-
-		case "clear":
-			return handleFilterClear(prefs, chatID, modified)
-
-		case "save":
-			if len(parts) < 3 {
-				return `❌ Please specify a name for this filter.
-
-Usage: /filter save "My Weekend Events"
-
-Examples:
-/filter save "March Weekends"
-/filter save "Pebble Beach Events"`, nil
-			}
-			filterName := strings.Join(parts[2:], " ")
-			// Remove quotes if present
-			filterName = strings.Trim(filterName, "\"")
-			return handleFilterSave(prefs, chatID, filterName, modified)
-
-		case "load":
-			if len(parts) < 3 {
-				return `❌ Please specify the filter name to load.
-
-Usage: /filter load "My Weekend Events"
-
-Use /filters to see all saved filters.`, nil
-			}
-			filterName := strings.Join(parts[2:], " ")
-			// Remove quotes if present
-			filterName = strings.Trim(filterName, "\"")
-			return handleFilterLoad(prefs, chatID, filterName, modified)
-
-		case "delete":
-			if len(parts) < 3 {
-				return `❌ Please specify the filter name to delete.
-
-Usage: /filter delete "My Weekend Events"
-
-Use /filters to see all saved filters.`, nil
-			}
-			filterName := strings.Join(parts[2:], " ")
-			// Remove quotes if present
-			filterName = strings.Trim(filterName, "\"")
-			return handleFilterDelete(prefs, chatID, filterName, modified)
-
-		default:
-			return `❌ Unknown filter subcommand.
-
-Available subcommands:
-• /filter date "Mar 1-15" - Set date range
-• /filter course "Pebble Beach" - Filter by course
-• /filter city "Las Vegas" - Filter by city
-• /filter weekends - Toggle weekends-only
-• /filter save "name" - Save current filter
-• /filter load "name" - Load saved filter
-• /filter delete "name" - Delete saved filter
-• /filter clear - Remove active filter
-• /filter - Show current filter status
-
-Use /filters to list all saved filters.`, nil
-		}
+		return processFilterCommand(parts, prefs, chatID, modified)
 
 	case "/filters":
 		return handleFiltersList(prefs, chatID)
@@ -2141,18 +1973,7 @@ func handleStats(prefs preferences.Preferences, chatID, period string) string {
 	// Events marked by status
 	if len(stats.EventsMarked) > 0 {
 		msg.WriteString("\n<b>Events Marked:</b>\n")
-		if count, ok := stats.EventsMarked[preferences.EventStatusInterested]; ok && count > 0 {
-			msg.WriteString(fmt.Sprintf("  ⭐ Interested: %d\n", count))
-		}
-		if count, ok := stats.EventsMarked[preferences.EventStatusRegistered]; ok && count > 0 {
-			msg.WriteString(fmt.Sprintf("  ✅ Registered: %d\n", count))
-		}
-		if count, ok := stats.EventsMarked[preferences.EventStatusMaybe]; ok && count > 0 {
-			msg.WriteString(fmt.Sprintf("  🤔 Maybe: %d\n", count))
-		}
-		if count, ok := stats.EventsMarked[preferences.EventStatusSkip]; ok && count > 0 {
-			msg.WriteString(fmt.Sprintf("  ❌ Skipped: %d\n", count))
-		}
+		formatStatusCounts(&msg, stats.EventsMarked)
 	}
 
 	// Total marked
