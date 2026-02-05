@@ -363,33 +363,19 @@ func FormatEventChange(evt *event.Event, changeType, oldValue, newValue string) 
 	switch changeType {
 	case "date":
 		msg.WriteString("📅 <b>Date Changed:</b>\n")
-		if oldValue != "" {
-			msg.WriteString(fmt.Sprintf("  ❌ <s>%s</s>\n", oldValue))
-		} else {
-			msg.WriteString("  ❌ <s>No date</s>\n")
-		}
+		// Format date nicely if present
+		displayNew := newValue
 		if newValue != "" {
-			niceDate := event.FormatDateNice(newValue)
-			msg.WriteString(fmt.Sprintf("  ✅ %s\n", niceDate))
-		} else {
-			msg.WriteString("  ✅ No date\n")
+			displayNew = event.FormatDateNice(newValue)
 		}
+		formatChangeValue(&msg, oldValue, displayNew, "date")
 	case "title":
 		msg.WriteString("🏌️ <b>Title Changed:</b>\n")
 		msg.WriteString(fmt.Sprintf("  ❌ <s>%s</s>\n", oldValue))
 		msg.WriteString(fmt.Sprintf("  ✅ %s\n", newValue))
 	case "city":
 		msg.WriteString("🏢 <b>City Changed:</b>\n")
-		if oldValue != "" {
-			msg.WriteString(fmt.Sprintf("  ❌ <s>%s</s>\n", oldValue))
-		} else {
-			msg.WriteString("  ❌ <s>No city</s>\n")
-		}
-		if newValue != "" {
-			msg.WriteString(fmt.Sprintf("  ✅ %s\n", newValue))
-		} else {
-			msg.WriteString("  ✅ No city\n")
-		}
+		formatChangeValue(&msg, oldValue, newValue, "city")
 	}
 
 	msg.WriteString("\n🔗 <a href=\"https://vgagolf.org/state-events\">vgagolf.org/state-events</a>\n")

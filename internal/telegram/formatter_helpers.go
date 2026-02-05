@@ -7,6 +7,23 @@ import (
 	"github.com/pfrederiksen/vga-events/internal/event"
 )
 
+// formatChangeValue formats old/new value display for event changes
+func formatChangeValue(msg *strings.Builder, oldValue, newValue, fieldName string) {
+	// Show old value
+	if oldValue != "" {
+		msg.WriteString(fmt.Sprintf("  ❌ <s>%s</s>\n", oldValue))
+	} else {
+		msg.WriteString(fmt.Sprintf("  ❌ <s>No %s</s>\n", fieldName))
+	}
+
+	// Show new value
+	if newValue != "" {
+		msg.WriteString(fmt.Sprintf("  ✅ %s\n", newValue))
+	} else {
+		msg.WriteString(fmt.Sprintf("  ✅ No %s\n", fieldName))
+	}
+}
+
 // formatEventHeader writes common event header fields to a message builder
 func formatEventHeader(msg *strings.Builder, evt *event.Event, hasNote bool) {
 	if hasNote {
