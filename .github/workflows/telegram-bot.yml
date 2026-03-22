@@ -50,11 +50,28 @@ jobs:
           # Create snapshots directory
           mkdir -p .snapshots
 
-          # Run vga-events and capture exit code
-          set +e
-          ./vga-events --check-state all --format json --data-dir .snapshots > events.json
-          EXIT_CODE=$?
-          set -e
+          # Run vga-events with retry for transient network failures
+          MAX_RETRIES=3
+          RETRY_DELAY=30
+          EXIT_CODE=1
+
+          for attempt in $(seq 1 $MAX_RETRIES); do
+            echo "Attempt $attempt of $MAX_RETRIES..."
+            set +e
+            ./vga-events --check-state all --format json --data-dir .snapshots > events.json
+            EXIT_CODE=$?
+            set -e
+
+            if [ $EXIT_CODE -ne 1 ]; then
+              break
+            fi
+
+            if [ $attempt -lt $MAX_RETRIES ]; then
+              echo "Attempt $attempt failed (exit code $EXIT_CODE), retrying in ${RETRY_DELAY}s..."
+              sleep $RETRY_DELAY
+              RETRY_DELAY=$((RETRY_DELAY * 2))
+            fi
+          done
 
           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
 
