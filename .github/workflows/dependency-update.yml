@@ -167,36 +167,31 @@ jobs:
 
       - name: Create Go version update issue
         if: steps.go-version.outputs.current != steps.go-version.outputs.latest
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
-          script: |
-            const current = '${{ steps.go-version.outputs.current }}';
-            const latest = '${{ steps.go-version.outputs.latest }}';
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CURRENT="${{ steps.go-version.outputs.current }}"
+          LATEST="${{ steps.go-version.outputs.latest }}"
 
-            // Check if issue already exists
-            const issues = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              labels: 'go-version'
-            });
+          # Check if issue already exists
+          EXISTING=$(gh issue list --label "go-version" --state open --json number,title --jq '.[] | select(.title | contains("Update Go version")) | .number')
 
-            const existingIssue = issues.data.find(issue =>
-              issue.title.includes('Update Go version')
-            );
+          if [ -n "$EXISTING" ]; then
+            echo "Issue already exists: #$EXISTING"
+          else
+            gh issue create \
+              --title "Update Go version from ${CURRENT} to ${LATEST}" \
+              --body "A new Go version is available.
 
-            if (existingIssue) {
-              console.log('Issue already exists:', existingIssue.number);
-            } else {
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `Update Go version from ${current} to ${latest}`,
-                body: `A new Go version is available.\n\n**Current:** ${current}\n**Latest:** ${latest}\n\nConsider updating:\n- go.mod\n- .github/workflows/*.yml\n- README.md`,
-                labels: ['dependencies', 'go-version']
-              });
-            }
+          **Current:** ${CURRENT}
+          **Latest:** ${LATEST}
+
+          Consider updating:
+          - go.mod
+          - .github/workflows/*.yml
+          - README.md" \
+              --label "dependencies" --label "go-version"
+          fi
 
   security-advisories:
     name: Check Security Advisories
@@ -235,17 +230,18 @@ jobs:
 
       - name: Create security issue if vulnerabilities found
         if: failure()
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
-          script: |
-            const fs = require('fs');
-            const report = fs.readFileSync('security-report.md', 'utf8');
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if a similar issue already exists
+          EXISTING=$(gh issue list --label "security" --label "dependencies" --state open --json number --jq '.[0].number')
 
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: '🚨 Security: Vulnerabilities detected in dependencies',
-              body: report,
-              labels: ['security', 'dependencies', 'high-priority']
-            });
+          if [ -n "$EXISTING" ]; then
+            echo "Updating existing security issue #$EXISTING"
+            gh issue comment "$EXISTING" --body-file security-report.md
+          else
+            gh issue create \
+              --title "Security: Vulnerabilities detected in dependencies" \
+              --body-file security-report.md \
+              --label "security" --label "dependencies" --label "high-priority"
+          fi
