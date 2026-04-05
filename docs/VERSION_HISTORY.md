@@ -1,8 +1,18 @@
 # Version History
 
-## Current Version: v0.7.0
+## Current Version: v0.8.2
 
-### v0.7.0 (Latest)
+### v0.8.2 (Latest)
+
+**Workflow Reliability Fixes**
+- Dependency automation now limits itself to Go-compatible patch updates instead of attempting upgrades that require a newer toolchain than the project supports.
+- Release-supporting automation now creates required labels before opening issues or PRs, preventing scheduled workflow failures due to missing labels.
+- The User Feedback Agent workflow was rewritten into valid, parseable YAML and aligned with the labels it uses at runtime.
+
+**CI Stability**
+- Fixed a date-sensitive `internal/filter` integration test that failed once March moved into the past because the date parser intentionally rolls ambiguous month-only ranges into the next year.
+
+### v0.7.0
 
 **Advanced Event Filtering** - Create custom filters for precise event discovery
 - Filter by date ranges (e.g., "Mar 1-15", "March", "Apr 1 - May 15")

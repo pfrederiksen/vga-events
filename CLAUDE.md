@@ -20,7 +20,14 @@ Welcome to the VGA Events Bot project documentation. This interactive Telegram b
 
 ## Project Overview
 
-**Current Version:** v0.8.0
+**Current Version:** v0.8.2
+
+**v0.8.2**
+
+- Fixed the `Dependency Update` workflow so it only proposes Go-compatible patch updates instead of failing on modules that now require newer Go versions.
+- Added automatic label provisioning for workflow-created issues and PRs so scheduled automation no longer fails when labels are missing.
+- Fixed a date-sensitive `internal/filter` integration test that started failing after March rolled over.
+- Repaired the `User Feedback Agent` workflow YAML and aligned its runtime labels so GitHub parses and runs it correctly again.
 
 **Key Features:**
 - ✅ Multi-user Telegram bot with personalized notifications
