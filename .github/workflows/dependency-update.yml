@@ -27,31 +27,33 @@ jobs:
       - name: Check for updates
         id: check
         run: |
-          echo "Checking for dependency updates..."
+          CURRENT_GO=$(grep "^go " go.mod | awk '{print $2}')
+          echo "Checking for patch-level dependency updates compatible with Go $CURRENT_GO..."
 
-          # Get current dependencies
-          go list -m -u -json all > deps-before.json
+          # Only attempt patch updates so automation stays within the current
+          # supported Go line instead of proposing upgrades that require a newer toolchain.
+          go get -u=patch ./...
+          go mod tidy
 
-          # Count available updates
-          UPDATES=$(jq -r 'select(.Update != null) | .Path' deps-before.json | wc -l)
-          echo "updates=$UPDATES" >> $GITHUB_OUTPUT
-          echo "Found $UPDATES available updates"
-
-          # List updates
-          if [ "$UPDATES" -gt 0 ]; then
-            echo "## Available Dependency Updates" > update-summary.md
+          if git diff --quiet -- go.mod go.sum; then
+            echo "updates=0" >> $GITHUB_OUTPUT
+            echo "No compatible patch updates found"
+          else
+            echo "updates=1" >> $GITHUB_OUTPUT
+            echo "Compatible patch updates found"
+            echo "## Dependency Update Summary" > update-summary.md
             echo "" >> update-summary.md
-            jq -r 'select(.Update != null) | "- **\(.Path)**: \(.Version) → \(.Update.Version)"' deps-before.json >> update-summary.md
+            echo "Go version: $CURRENT_GO" >> update-summary.md
+            echo "" >> update-summary.md
+            echo '```diff' >> update-summary.md
+            git diff -- go.mod go.sum >> update-summary.md
+            echo '```' >> update-summary.md
           fi
 
-      - name: Update dependencies
+      - name: Verify updated dependencies
         if: steps.check.outputs.updates > 0
         run: |
-          echo "Updating dependencies..."
-
-          # Update all dependencies
-          go get -u ./...
-          go mod tidy
+          echo "Verifying compatible dependency updates..."
 
           # Run tests to verify updates don't break anything
           if ! go test ./...; then
@@ -94,6 +96,14 @@ jobs:
           echo "" >> report.md
           echo "✅ All tests pass with updated dependencies" >> report.md
 
+      - name: Ensure PR labels exist
+        if: steps.check.outputs.updates > 0
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create dependencies --color 0366d6 --description "Dependency-related work" --force
+          gh label create automated --color 5319e7 --description "Automated workflow changes" --force
+
       - name: Create Pull Request
         if: steps.check.outputs.updates > 0
         uses: peter-evans/create-pull-request@v6
@@ -135,6 +145,15 @@ jobs:
 
       - name: Create Actions update PR
         if: steps.check-actions.outputs.outdated > 0
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create dependencies --color 0366d6 --description "Dependency-related work" --force
+          gh label create github-actions --color 1d76db --description "GitHub Actions maintenance" --force
+          gh label create automated --color 5319e7 --description "Automated workflow changes" --force
+
+      - name: Open Actions update PR
+        if: steps.check-actions.outputs.outdated > 0
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -175,6 +194,9 @@ jobs:
 
           # Check if issue already exists
           EXISTING=$(gh issue list --label "go-version" --state open --json number,title --jq '.[] | select(.title | contains("Update Go version")) | .number')
+
+          gh label create dependencies --color 0366d6 --description "Dependency-related work" --force
+          gh label create go-version --color fbca04 --description "Go version maintenance" --force
 
           if [ -n "$EXISTING" ]; then
             echo "Issue already exists: #$EXISTING"
@@ -233,6 +255,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          gh label create security --color b60205 --description "Security-related work" --force
+          gh label create dependencies --color 0366d6 --description "Dependency-related work" --force
+          gh label create high-priority --color d93f0b --description "Requires prompt attention" --force
+
           # Check if a similar issue already exists
           EXISTING=$(gh issue list --label "security" --label "dependencies" --state open --json number --jq '.[0].number')
 
