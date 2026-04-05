@@ -10,6 +10,12 @@ import (
 
 // TestIntegration demonstrates the full filter workflow
 func TestIntegration(t *testing.T) {
+	marchFrom, _, err := filter.ParseDateRange("March")
+	if err != nil {
+		t.Fatalf("ParseDateRange failed: %v", err)
+	}
+	targetYear := marchFrom.Year()
+
 	// Create sample events
 	events := []*event.Event{
 		{
@@ -17,28 +23,28 @@ func TestIntegration(t *testing.T) {
 			Title:    "Pebble Beach Pro-Am",
 			State:    "CA",
 			City:     "Pebble Beach",
-			DateText: "March 15, 2026",
+			DateText: time.Date(targetYear, time.March, 15, 0, 0, 0, 0, time.UTC).Format("January 2, 2006"),
 		},
 		{
 			ID:       "2",
 			Title:    "Shadow Creek Invitational",
 			State:    "NV",
 			City:     "Las Vegas",
-			DateText: "March 22, 2026", // Saturday
+			DateText: time.Date(targetYear, time.March, 22, 0, 0, 0, 0, time.UTC).Format("January 2, 2006"), // Saturday
 		},
 		{
 			ID:       "3",
 			Title:    "Torrey Pines Championship",
 			State:    "CA",
 			City:     "San Diego",
-			DateText: "April 5, 2026",
+			DateText: time.Date(targetYear, time.April, 5, 0, 0, 0, 0, time.UTC).Format("January 2, 2006"),
 		},
 		{
 			ID:       "4",
 			Title:    "Augusta National Event",
 			State:    "GA",
 			City:     "Augusta",
-			DateText: "March 10, 2026",
+			DateText: time.Date(targetYear, time.March, 10, 0, 0, 0, 0, time.UTC).Format("January 2, 2006"),
 		},
 	}
 
