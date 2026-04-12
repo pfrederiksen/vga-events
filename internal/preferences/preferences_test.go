@@ -245,10 +245,14 @@ func TestMigration(t *testing.T) {
 	// Simulate an existing user without new fields (loaded from old JSON)
 	prefs := make(Preferences)
 	prefs["legacy-user"] = &UserPreferences{
-		States:          []string{"NV", "CA"},
-		Active:          true,
-		SeenEventIDs:    nil, // Old user doesn't have this
-		DigestFrequency: "",  // Old user doesn't have this
+		CorePreferences: CorePreferences{
+			States: []string{"NV", "CA"},
+			Active: true,
+		},
+		DigestPreferences: DigestPreferences{
+			SeenEventIDs:    nil, // Old user doesn't have this
+			DigestFrequency: "",  // Old user doesn't have this
+		},
 	}
 
 	// GetUser should initialize missing fields
@@ -572,9 +576,13 @@ func TestEventStatusMigration(t *testing.T) {
 	// Simulate an existing user without EventStatuses field
 	prefs := make(Preferences)
 	prefs["legacy-user"] = &UserPreferences{
-		States:        []string{"NV"},
-		Active:        true,
-		EventStatuses: nil, // Old user doesn't have this
+		CorePreferences: CorePreferences{
+			States: []string{"NV"},
+			Active: true,
+		},
+		EventInteractionPreferences: EventInteractionPreferences{
+			EventStatuses: nil, // Old user doesn't have this
+		},
 	}
 
 	// GetUser should initialize missing fields
@@ -594,9 +602,13 @@ func TestReminderDaysMigration(t *testing.T) {
 	// Simulate an existing user without ReminderDays field
 	prefs := make(Preferences)
 	prefs["legacy-user"] = &UserPreferences{
-		States:       []string{"NV"},
-		Active:       true,
-		ReminderDays: nil, // Old user doesn't have this
+		CorePreferences: CorePreferences{
+			States: []string{"NV"},
+			Active: true,
+		},
+		EventInteractionPreferences: EventInteractionPreferences{
+			ReminderDays: nil, // Old user doesn't have this
+		},
 	}
 
 	// GetUser should work (migration happens in GetUser for existing users)
@@ -645,9 +657,11 @@ func TestUserPreferences_SetEventNote(t *testing.T) {
 
 func TestUserPreferences_GetEventNote(t *testing.T) {
 	user := &UserPreferences{
-		EventNotes: map[string]string{
-			"event123": "Great tournament",
-			"event456": "Bring extra balls",
+		EventInteractionPreferences: EventInteractionPreferences{
+			EventNotes: map[string]string{
+				"event123": "Great tournament",
+				"event456": "Bring extra balls",
+			},
 		},
 	}
 
@@ -691,10 +705,12 @@ func TestUserPreferences_GetEventNote(t *testing.T) {
 
 func TestUserPreferences_RemoveEventNote(t *testing.T) {
 	user := &UserPreferences{
-		EventNotes: map[string]string{
-			"event123": "Great tournament",
-			"event456": "Bring extra balls",
-			"event789": "Early tee time",
+		EventInteractionPreferences: EventInteractionPreferences{
+			EventNotes: map[string]string{
+				"event123": "Great tournament",
+				"event456": "Bring extra balls",
+				"event789": "Early tee time",
+			},
 		},
 	}
 
@@ -728,8 +744,10 @@ func TestUserPreferences_EventNotes_Migration(t *testing.T) {
 
 	// Create a user without EventNotes (simulating old data)
 	prefs["user123"] = &UserPreferences{
-		States: []string{"NV"},
-		Active: true,
+		CorePreferences: CorePreferences{
+			States: []string{"NV"},
+			Active: true,
+		},
 	}
 
 	// GetUser should initialize EventNotes

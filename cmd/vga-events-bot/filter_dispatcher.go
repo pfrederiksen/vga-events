@@ -7,6 +7,14 @@ import (
 	"github.com/pfrederiksen/vga-events/internal/preferences"
 )
 
+func joinedFilterArgument(parts []string, missingMessage string) (string, string, bool) {
+	if len(parts) < 3 {
+		return missingMessage, "", false
+	}
+
+	return "", strings.Trim(strings.Join(parts[2:], " "), "\""), true
+}
+
 // processFilterCommand handles all /filter subcommands
 func processFilterCommand(parts []string, prefs preferences.Preferences, chatID string, modified *bool) (string, []*event.Event) {
 	// No subcommand - show current status
@@ -64,44 +72,38 @@ Examples:
 		return handleFilterClear(prefs, chatID, modified)
 
 	case "save":
-		if len(parts) < 3 {
-			return `❌ Please specify a name for this filter.
+		msg, filterName, ok := joinedFilterArgument(parts, `❌ Please specify a name for this filter.
 
 Usage: /filter save "My Weekend Events"
 
 Examples:
 /filter save "March Weekends"
-/filter save "Pebble Beach Events"`, nil
+/filter save "Pebble Beach Events"`)
+		if !ok {
+			return msg, nil
 		}
-		filterName := strings.Join(parts[2:], " ")
-		// Remove quotes if present
-		filterName = strings.Trim(filterName, "\"")
 		return handleFilterSave(prefs, chatID, filterName, modified)
 
 	case "load":
-		if len(parts) < 3 {
-			return `❌ Please specify the filter name to load.
+		msg, filterName, ok := joinedFilterArgument(parts, `❌ Please specify the filter name to load.
 
 Usage: /filter load "My Weekend Events"
 
-Use /filters to see all saved filters.`, nil
+Use /filters to see all saved filters.`)
+		if !ok {
+			return msg, nil
 		}
-		filterName := strings.Join(parts[2:], " ")
-		// Remove quotes if present
-		filterName = strings.Trim(filterName, "\"")
 		return handleFilterLoad(prefs, chatID, filterName, modified)
 
 	case "delete":
-		if len(parts) < 3 {
-			return `❌ Please specify the filter name to delete.
+		msg, filterName, ok := joinedFilterArgument(parts, `❌ Please specify the filter name to delete.
 
 Usage: /filter delete "My Weekend Events"
 
-Use /filters to see all saved filters.`, nil
+Use /filters to see all saved filters.`)
+		if !ok {
+			return msg, nil
 		}
-		filterName := strings.Join(parts[2:], " ")
-		// Remove quotes if present
-		filterName = strings.Trim(filterName, "\"")
 		return handleFilterDelete(prefs, chatID, filterName, modified)
 
 	default:

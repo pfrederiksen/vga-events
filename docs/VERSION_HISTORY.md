@@ -1,8 +1,22 @@
 # Version History
 
-## Current Version: v0.8.2
+## Current Version: v0.8.3
 
-### v0.8.2 (Latest)
+### v0.8.3 (Latest)
+
+**Go Toolchain Update**
+- Updated the project and GitHub Actions workflows to use Go `1.26.2`.
+
+**Automation Reliability**
+- Dependency and release automation now support a dedicated `AUTOMATION_PR_TOKEN` fallback and degrade cleanly when Actions is not allowed to create pull requests.
+
+**Refactoring and Maintainability**
+- Reduced complexity in the Telegram bot command and callback dispatchers by extracting dedicated handler helpers.
+- Split `UserPreferences` into embedded focused preference groups while preserving the existing API and JSON layout.
+- Consolidated repeated GitHub API request setup, scraper event parsing branches, CLI run-check orchestration, and Telegram HTTP test scaffolding.
+- Simplified repeated `/filter` command argument parsing and shared event-list delivery in bot flows.
+
+### v0.8.2
 
 **Workflow Reliability Fixes**
 - Dependency automation now limits itself to Go-compatible patch updates instead of attempting upgrades that require a newer toolchain than the project supports.

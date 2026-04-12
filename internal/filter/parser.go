@@ -8,6 +8,14 @@ import (
 	"time"
 )
 
+const monthPattern = `(?i)(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)`
+
+var (
+	sameMonthRangeRE  = regexp.MustCompile(`^` + monthPattern + `\s+(\d{1,2})\s*-\s*(\d{1,2})$`)
+	crossMonthRangeRE = regexp.MustCompile(`^` + monthPattern + `\s+(\d{1,2})\s*-\s*` + monthPattern + `\s+(\d{1,2})$`)
+	singleMonthRE     = regexp.MustCompile(`^` + monthPattern + `$`)
+)
+
 // ParseDateRange parses a date range string into start and end times.
 //
 // Supported formats:
@@ -28,81 +36,34 @@ func ParseDateRange(input string) (*time.Time, *time.Time, error) {
 		return nil, nil, fmt.Errorf("date range cannot be empty")
 	}
 
-	// Try various formats
-
-	// Format 1: "Mar 1-15" or "March 1-15"
-	re1 := regexp.MustCompile(`(?i)^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)\s+(\d{1,2})\s*-\s*(\d{1,2})$`)
-	if matches := re1.FindStringSubmatch(input); matches != nil {
-		month := parseMonth(matches[1])
-		if month == 0 {
-			return nil, nil, fmt.Errorf("invalid month: %s", matches[1])
-		}
-
-		day1, err := strconv.Atoi(matches[2])
-		if err != nil || day1 < 1 || day1 > 31 {
-			return nil, nil, fmt.Errorf("invalid day: %s", matches[2])
-		}
-
-		day2, err := strconv.Atoi(matches[3])
-		if err != nil || day2 < 1 || day2 > 31 {
-			return nil, nil, fmt.Errorf("invalid day: %s", matches[3])
+	if matches := sameMonthRangeRE.FindStringSubmatch(input); matches != nil {
+		month, day1, day2, err := parseMonthAndDays(matches[1], matches[2], matches[3])
+		if err != nil {
+			return nil, nil, err
 		}
 
 		year := getYearForMonth(month)
-		from := time.Date(year, month, day1, 0, 0, 0, 0, time.UTC)
-		to := time.Date(year, month, day2, 23, 59, 59, 0, time.UTC)
-
-		if from.After(to) {
-			return nil, nil, fmt.Errorf("start date must be before end date")
-		}
-
-		return &from, &to, nil
+		return createDateRange(year, month, day1, year, month, day2)
 	}
 
-	// Format 2: "Mar 1 - Mar 15" or "March 1 - March 15"
-	re2 := regexp.MustCompile(`(?i)^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)\s+(\d{1,2})\s*-\s*(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)\s+(\d{1,2})$`)
-	if matches := re2.FindStringSubmatch(input); matches != nil {
-		month1 := parseMonth(matches[1])
-		if month1 == 0 {
-			return nil, nil, fmt.Errorf("invalid month: %s", matches[1])
+	if matches := crossMonthRangeRE.FindStringSubmatch(input); matches != nil {
+		month1, day1, err := parseMonthAndDay(matches[1], matches[2])
+		if err != nil {
+			return nil, nil, err
 		}
-
-		day1, err := strconv.Atoi(matches[2])
-		if err != nil || day1 < 1 || day1 > 31 {
-			return nil, nil, fmt.Errorf("invalid day: %s", matches[2])
+		month2, day2, err := parseMonthAndDay(matches[3], matches[4])
+		if err != nil {
+			return nil, nil, err
 		}
-
-		month2 := parseMonth(matches[3])
-		if month2 == 0 {
-			return nil, nil, fmt.Errorf("invalid month: %s", matches[3])
-		}
-
-		day2, err := strconv.Atoi(matches[4])
-		if err != nil || day2 < 1 || day2 > 31 {
-			return nil, nil, fmt.Errorf("invalid day: %s", matches[4])
-		}
-
 		year1 := getYearForMonth(month1)
 		year2 := getYearForMonth(month2)
-
-		// If month2 < month1, assume month2 is in the next year
 		if month2 < month1 {
 			year2++
 		}
-
-		from := time.Date(year1, month1, day1, 0, 0, 0, 0, time.UTC)
-		to := time.Date(year2, month2, day2, 23, 59, 59, 0, time.UTC)
-
-		if from.After(to) {
-			return nil, nil, fmt.Errorf("start date must be before end date")
-		}
-
-		return &from, &to, nil
+		return createDateRange(year1, month1, day1, year2, month2, day2)
 	}
 
-	// Format 3: Single month "March" or "Mar" (entire month)
-	re3 := regexp.MustCompile(`(?i)^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$`)
-	if matches := re3.FindStringSubmatch(input); matches != nil {
+	if matches := singleMonthRE.FindStringSubmatch(input); matches != nil {
 		month := parseMonth(matches[1])
 		if month == 0 {
 			return nil, nil, fmt.Errorf("invalid month: %s", matches[1])
@@ -117,6 +78,45 @@ func ParseDateRange(input string) (*time.Time, *time.Time, error) {
 	}
 
 	return nil, nil, fmt.Errorf("invalid date range format. Use 'Mar 1-15', 'March 1 - March 15', or 'March'")
+}
+
+func parseMonthAndDay(monthText, dayText string) (time.Month, int, error) {
+	month := parseMonth(monthText)
+	if month == 0 {
+		return 0, 0, fmt.Errorf("invalid month: %s", monthText)
+	}
+
+	day, err := strconv.Atoi(dayText)
+	if err != nil || day < 1 || day > 31 {
+		return 0, 0, fmt.Errorf("invalid day: %s", dayText)
+	}
+
+	return month, day, nil
+}
+
+func parseMonthAndDays(monthText, day1Text, day2Text string) (time.Month, int, int, error) {
+	month, day1, err := parseMonthAndDay(monthText, day1Text)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	_, day2, err := parseMonthAndDay(monthText, day2Text)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	return month, day1, day2, nil
+}
+
+func createDateRange(year1 int, month1 time.Month, day1 int, year2 int, month2 time.Month, day2 int) (*time.Time, *time.Time, error) {
+	from := time.Date(year1, month1, day1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(year2, month2, day2, 23, 59, 59, 0, time.UTC)
+
+	if from.After(to) {
+		return nil, nil, fmt.Errorf("start date must be before end date")
+	}
+
+	return &from, &to, nil
 }
 
 // parseMonth converts a month name to time.Month

@@ -23,6 +23,11 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  # Use a PAT when repository settings disallow pull request creation from
+  # the default GITHUB_TOKEN. Fall back to GITHUB_TOKEN when the PAT is unset.
+  AUTOMATION_PR_TOKEN: ${{ secrets.AUTOMATION_PR_TOKEN || secrets.GITHUB_TOKEN }}
+
 jobs:
   validate-release:
     name: Validate Release
@@ -152,7 +157,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26.2'
 
       - name: Download changelog
         uses: actions/download-artifact@v4
@@ -219,9 +224,11 @@ jobs:
           fi
 
       - name: Create documentation PR
+        id: create_docs_pr
+        continue-on-error: true
         uses: peter-evans/create-pull-request@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ env.AUTOMATION_PR_TOKEN }}
           commit-message: "Docs: Update version badges to ${{ needs.validate-release.outputs.version }}"
           branch: docs/release-${{ needs.validate-release.outputs.version }}
           title: "Update documentation for ${{ needs.validate-release.outputs.version }}"
@@ -233,6 +240,26 @@ jobs:
             Changes:
             - Update version badges in README.md
           labels: documentation
+
+      - name: Report documentation PR creation failure
+        if: steps.create_docs_pr.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="docs/release-${{ needs.validate-release.outputs.version }}"
+          gh issue create \
+            --title "Release documentation PR requires Actions PR permission" \
+            --body "The release automation workflow pushed branch \`$BRANCH\` but could not open a pull request.
+
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Branch: ${{ github.server_url }}/${{ github.repository }}/tree/$BRANCH
+
+          To restore automatic PR creation, do one of the following:
+          - Enable repository setting: Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests
+          - Add a PAT secret named \`AUTOMATION_PR_TOKEN\` with \`repo\` scope for PR creation
+
+          This issue was created automatically so the documentation update is still visible even when PR creation is blocked." \
+            --label documentation
 
   notify-release:
     name: Notify Release

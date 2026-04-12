@@ -8,10 +8,36 @@ import (
 	"testing"
 )
 
+func newTestTelegramClient(t *testing.T, handler http.HandlerFunc) (*Client, func()) {
+	t.Helper()
+
+	server := httptest.NewServer(handler)
+	originalURL := apiBaseURL
+	apiBaseURL = server.URL + "/"
+
+	client := &Client{
+		botToken:   "test-token",
+		chatID:     "12345",
+		httpClient: &http.Client{},
+	}
+
+	cleanup := func() {
+		apiBaseURL = originalURL
+		server.Close()
+	}
+
+	return client, cleanup
+}
+
+func jsonResponse(w http.ResponseWriter, statusCode int, response map[string]interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
 // TestSendMessage_Success tests successful message sending
 func TestSendMessage_Success(t *testing.T) {
-	// Create a test server that mimics Telegram API
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client, cleanup := newTestTelegramClient(t, func(w http.ResponseWriter, r *http.Request) {
 		// Verify request method and content type
 		if r.Method != "POST" {
 			t.Errorf("Expected POST request, got %s", r.Method)
@@ -31,21 +57,9 @@ func TestSendMessage_Success(t *testing.T) {
 				"text": "Test message",
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	// Override the API base URL for testing
-	originalURL := apiBaseURL
-	apiBaseURL = server.URL + "/"
-	defer func() { apiBaseURL = originalURL }()
-
-	client := &Client{
-		botToken:   "test-token",
-		chatID:     "12345",
-		httpClient: &http.Client{},
-	}
+		jsonResponse(w, http.StatusOK, response)
+	})
+	defer cleanup()
 
 	err := client.SendMessage("Test message")
 	if err != nil {
@@ -55,26 +69,14 @@ func TestSendMessage_Success(t *testing.T) {
 
 // TestSendMessage_APIError tests API error handling
 func TestSendMessage_APIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client, cleanup := newTestTelegramClient(t, func(w http.ResponseWriter, r *http.Request) {
 		// Return error response
-		response := map[string]interface{}{
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
 			"ok":          false,
 			"description": "Bad Request: chat not found",
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	originalURL := apiBaseURL
-	apiBaseURL = server.URL + "/"
-	defer func() { apiBaseURL = originalURL }()
-
-	client := &Client{
-		botToken:   "test-token",
-		chatID:     "12345",
-		httpClient: &http.Client{},
-	}
+		})
+	})
+	defer cleanup()
 
 	err := client.SendMessage("Test message")
 	if err == nil {
@@ -87,22 +89,12 @@ func TestSendMessage_APIError(t *testing.T) {
 
 // TestSendMessage_HTTPError tests HTTP error handling
 func TestSendMessage_HTTPError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client, cleanup := newTestTelegramClient(t, func(w http.ResponseWriter, r *http.Request) {
 		// Return HTTP error
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("Internal Server Error"))
-	}))
-	defer server.Close()
-
-	originalURL := apiBaseURL
-	apiBaseURL = server.URL + "/"
-	defer func() { apiBaseURL = originalURL }()
-
-	client := &Client{
-		botToken:   "test-token",
-		chatID:     "12345",
-		httpClient: &http.Client{},
-	}
+	})
+	defer cleanup()
 
 	err := client.SendMessage("Test message")
 	if err == nil {
@@ -115,27 +107,15 @@ func TestSendMessage_HTTPError(t *testing.T) {
 
 // TestSendMessageWithKeyboard_Success tests successful message with keyboard
 func TestSendMessageWithKeyboard_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := map[string]interface{}{
+	client, cleanup := newTestTelegramClient(t, func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
 			"ok": true,
 			"result": map[string]interface{}{
 				"message_id": 123,
 			},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	originalURL := apiBaseURL
-	apiBaseURL = server.URL + "/"
-	defer func() { apiBaseURL = originalURL }()
-
-	client := &Client{
-		botToken:   "test-token",
-		chatID:     "12345",
-		httpClient: &http.Client{},
-	}
+		})
+	})
+	defer cleanup()
 
 	keyboard := &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
@@ -154,25 +134,13 @@ func TestSendMessageWithKeyboard_Success(t *testing.T) {
 
 // TestSendMessageWithKeyboard_APIError tests keyboard message API error
 func TestSendMessageWithKeyboard_APIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := map[string]interface{}{
+	client, cleanup := newTestTelegramClient(t, func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
 			"ok":          false,
 			"description": "Bad Request: invalid keyboard",
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	originalURL := apiBaseURL
-	apiBaseURL = server.URL + "/"
-	defer func() { apiBaseURL = originalURL }()
-
-	client := &Client{
-		botToken:   "test-token",
-		chatID:     "12345",
-		httpClient: &http.Client{},
-	}
+		})
+	})
+	defer cleanup()
 
 	keyboard := &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
@@ -188,25 +156,13 @@ func TestSendMessageWithKeyboard_APIError(t *testing.T) {
 
 // TestAnswerCallbackQuery_Success tests successful callback query answer
 func TestAnswerCallbackQuery_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := map[string]interface{}{
+	client, cleanup := newTestTelegramClient(t, func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
 			"ok":     true,
 			"result": true,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	originalURL := apiBaseURL
-	apiBaseURL = server.URL + "/"
-	defer func() { apiBaseURL = originalURL }()
-
-	client := &Client{
-		botToken:   "test-token",
-		chatID:     "12345",
-		httpClient: &http.Client{},
-	}
+		})
+	})
+	defer cleanup()
 
 	err := client.AnswerCallbackQuery("callback123", "Success!", false)
 	if err != nil {
@@ -217,26 +173,13 @@ func TestAnswerCallbackQuery_Success(t *testing.T) {
 // testAnswerCallbackQueryError is a helper for testing AnswerCallbackQuery error cases
 func testAnswerCallbackQueryError(t *testing.T, callbackID, errorDesc string) {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		response := map[string]interface{}{
+	client, cleanup := newTestTelegramClient(t, func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, http.StatusBadRequest, map[string]interface{}{
 			"ok":          false,
 			"description": errorDesc,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	originalURL := apiBaseURL
-	apiBaseURL = server.URL + "/"
-	defer func() { apiBaseURL = originalURL }()
-
-	client := &Client{
-		botToken:   "test-token",
-		chatID:     "12345",
-		httpClient: &http.Client{},
-	}
+		})
+	})
+	defer cleanup()
 
 	err := client.AnswerCallbackQuery(callbackID, "text", false)
 	if err == nil {
@@ -256,27 +199,15 @@ func TestAnswerCallbackQuery_APIError(t *testing.T) {
 
 // TestEditMessageText_Success tests successful message edit
 func TestEditMessageText_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := map[string]interface{}{
+	client, cleanup := newTestTelegramClient(t, func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
 			"ok": true,
 			"result": map[string]interface{}{
 				"message_id": 123,
 			},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	originalURL := apiBaseURL
-	apiBaseURL = server.URL + "/"
-	defer func() { apiBaseURL = originalURL }()
-
-	client := &Client{
-		botToken:   "test-token",
-		chatID:     "12345",
-		httpClient: &http.Client{},
-	}
+		})
+	})
+	defer cleanup()
 
 	err := client.EditMessageText("12345", 123, "Updated text", nil)
 	if err != nil {
@@ -328,27 +259,15 @@ func TestEditMessageText_EmptyText(t *testing.T) {
 
 // TestEditMessageText_WithKeyboard tests editing with keyboard
 func TestEditMessageText_WithKeyboard(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := map[string]interface{}{
+	client, cleanup := newTestTelegramClient(t, func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
 			"ok": true,
 			"result": map[string]interface{}{
 				"message_id": 123,
 			},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	originalURL := apiBaseURL
-	apiBaseURL = server.URL + "/"
-	defer func() { apiBaseURL = originalURL }()
-
-	client := &Client{
-		botToken:   "test-token",
-		chatID:     "12345",
-		httpClient: &http.Client{},
-	}
+		})
+	})
+	defer cleanup()
 
 	keyboard := &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
@@ -364,27 +283,13 @@ func TestEditMessageText_WithKeyboard(t *testing.T) {
 
 // TestEditMessageText_APIError tests API error handling
 func TestEditMessageText_APIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Return HTTP error status
-		w.WriteHeader(http.StatusBadRequest)
-		response := map[string]interface{}{
+	client, cleanup := newTestTelegramClient(t, func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, http.StatusBadRequest, map[string]interface{}{
 			"ok":          false,
 			"description": "Message not found",
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	originalURL := apiBaseURL
-	apiBaseURL = server.URL + "/"
-	defer func() { apiBaseURL = originalURL }()
-
-	client := &Client{
-		botToken:   "test-token",
-		chatID:     "12345",
-		httpClient: &http.Client{},
-	}
+		})
+	})
+	defer cleanup()
 
 	err := client.EditMessageText("12345", 999, "text", nil)
 	if err == nil {
@@ -394,13 +299,13 @@ func TestEditMessageText_APIError(t *testing.T) {
 
 // TestSendDocument_Success tests successful document sending
 func TestSendDocument_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client, cleanup := newTestTelegramClient(t, func(w http.ResponseWriter, r *http.Request) {
 		// Verify multipart form data
 		if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
 			t.Errorf("Expected multipart/form-data, got %s", r.Header.Get("Content-Type"))
 		}
 
-		response := map[string]interface{}{
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
 			"ok": true,
 			"result": map[string]interface{}{
 				"message_id": 123,
@@ -408,21 +313,9 @@ func TestSendDocument_Success(t *testing.T) {
 					"file_id": "doc123",
 				},
 			},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	originalURL := apiBaseURL
-	apiBaseURL = server.URL + "/"
-	defer func() { apiBaseURL = originalURL }()
-
-	client := &Client{
-		botToken:   "test-token",
-		chatID:     "12345",
-		httpClient: &http.Client{},
-	}
+		})
+	})
+	defer cleanup()
 
 	data := []byte("test file content")
 	err := client.SendDocument("test.txt", data, "Test document")
@@ -462,25 +355,13 @@ func TestSendDocument_EmptyFilename(t *testing.T) {
 
 // TestSendDocument_APIError tests API error handling
 func TestSendDocument_APIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := map[string]interface{}{
+	client, cleanup := newTestTelegramClient(t, func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
 			"ok":          false,
 			"description": "File too large",
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	originalURL := apiBaseURL
-	apiBaseURL = server.URL + "/"
-	defer func() { apiBaseURL = originalURL }()
-
-	client := &Client{
-		botToken:   "test-token",
-		chatID:     "12345",
-		httpClient: &http.Client{},
-	}
+		})
+	})
+	defer cleanup()
 
 	data := []byte("content")
 	err := client.SendDocument("test.txt", data, "caption")

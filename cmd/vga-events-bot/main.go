@@ -622,7 +622,110 @@ Sorted by soonest first:`, len(eventsToSend), len(filteredEvents), strings.Join(
 	return fmt.Sprintf("[DRY RUN] Would send %d upcoming events", len(eventsToSend))
 }
 
-//nolint:gocyclo // Callback handler complexity is inherent to handling multiple callback types
+func parseCallbackData(data string) (string, string, bool) {
+	parts := strings.Split(data, ":")
+	if len(parts) == 0 {
+		return "", "", false
+	}
+
+	action := parts[0]
+	param := ""
+	if len(parts) > 1 {
+		param = parts[1]
+	}
+
+	return action, param, true
+}
+
+func handleUnsubscribeAllCallback(prefs preferences.Preferences, chatID, param string, modified *bool) string {
+	if param != "confirm" {
+		return "❌ Invalid action"
+	}
+
+	user := prefs.GetUser(chatID)
+	states := user.States
+	count := len(states)
+	if count == 0 {
+		return "ℹ️ You have no active subscriptions."
+	}
+
+	user.States = []string{}
+	*modified = true
+	return fmt.Sprintf("✅ <b>Unsubscribed from all %d state(s)</b>\n\nYou will no longer receive event notifications.\n\nUse /subscribe &lt;STATE&gt; to start receiving notifications again.", count)
+}
+
+func processCallbackAction(action, param string, prefs preferences.Preferences, callback *telegram.CallbackQuery, chatID string, modified *bool, botToken string, dryRun bool) (string, *telegram.InlineKeyboardMarkup) {
+	switch action {
+	case "subscribe":
+		if param != "" {
+			responseText, _ := handleSubscribe(prefs, chatID, param, modified, botToken, dryRun)
+			return responseText, nil
+		}
+		return showStateSelectionKeyboard()
+	case "unsubscribe":
+		return handleUnsubscribe(prefs, chatID, param, modified), nil
+	case "unsubscribe-all":
+		return handleUnsubscribeAllCallback(prefs, chatID, param, modified), nil
+	case "manage":
+		return showManageSubscriptionsKeyboard(prefs, chatID)
+	case "settings":
+		return showSettingsKeyboard(prefs, chatID)
+	case "digest":
+		if user := prefs.GetUser(chatID); user != nil {
+			if user.SetDigestFrequency(param) {
+				*modified = true
+				return fmt.Sprintf("✅ Digest frequency updated to <b>%s</b>", param), nil
+			}
+			return "❌ Invalid digest frequency", nil
+		}
+		return "", nil
+	case "preview":
+		return handlePreviewCallback(prefs, callback, modified, botToken, dryRun), nil
+	case "menu":
+		return handleMenuCallback(param, prefs, chatID, botToken, dryRun, modified)
+	case "status":
+		return handleStatusCallback(callback.Data, prefs, chatID, modified), nil
+	case "reminder":
+		return handleReminderCallback(callback.Data, prefs, chatID, modified)
+	case "calendar":
+		return handleCalendarCallback(param, chatID, botToken, dryRun), nil
+	case "bulk":
+		return handleBulkCallback(prefs, chatID, param, modified, botToken, dryRun)
+	case "ack-change":
+		return "✅ Change acknowledged. You can update your calendar if needed.", nil
+	default:
+		return "Unknown action", nil
+	}
+}
+
+func sendCallbackResponse(botToken, chatID, callbackID string, messageID int, responseText string, keyboard *telegram.InlineKeyboardMarkup) {
+	client, err := telegram.NewClient(botToken, chatID)
+	if err != nil {
+		return
+	}
+
+	if err := client.AnswerCallbackQuery(callbackID, "", false); err != nil {
+		fmt.Fprintf(os.Stderr, "Error answering callback: %v\n", err)
+	}
+
+	if messageID > 0 {
+		if err := client.EditMessageText(chatID, messageID, responseText, keyboard); err != nil {
+			fmt.Fprintf(os.Stderr, "Error editing message: %v\n", err)
+		}
+		return
+	}
+
+	var sendErr error
+	if keyboard != nil {
+		sendErr = client.SendMessageWithKeyboard(responseText, keyboard)
+	} else {
+		sendErr = client.SendMessage(responseText)
+	}
+	if sendErr != nil {
+		fmt.Fprintf(os.Stderr, "Error sending message: %v\n", sendErr)
+	}
+}
+
 func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.CallbackQuery, modified *bool, botToken string, dryRun bool) {
 	chatID := fmt.Sprintf("%d", callback.From.ID)
 	messageID := 0
@@ -632,130 +735,118 @@ func handleCallbackQuery(prefs preferences.Preferences, callback *telegram.Callb
 
 	fmt.Printf("Callback from %s (chat %s): %s\n", callback.From.FirstName, chatID, callback.Data)
 
-	// Parse callback data (format: "action:param")
-	parts := strings.Split(callback.Data, ":")
-	if len(parts) == 0 {
+	action, param, ok := parseCallbackData(callback.Data)
+	if !ok {
 		return
 	}
 
-	action := parts[0]
-	var param string
-	if len(parts) > 1 {
-		param = parts[1]
-	}
+	responseText, keyboard := processCallbackAction(action, param, prefs, callback, chatID, modified, botToken, dryRun)
 
-	var responseText string
-	var keyboard *telegram.InlineKeyboardMarkup
-
-	switch action {
-	case "subscribe":
-		if param != "" {
-			responseText, _ = handleSubscribe(prefs, chatID, param, modified, botToken, dryRun)
-		} else {
-			// Show state selection keyboard
-			responseText, keyboard = showStateSelectionKeyboard()
-		}
-
-	case "unsubscribe":
-		responseText = handleUnsubscribe(prefs, chatID, param, modified)
-
-	case "unsubscribe-all":
-		if param == "confirm" {
-			user := prefs.GetUser(chatID)
-			states := user.States
-			count := len(states)
-			if count > 0 {
-				user.States = []string{}
-				*modified = true
-				responseText = fmt.Sprintf("✅ <b>Unsubscribed from all %d state(s)</b>\n\nYou will no longer receive event notifications.\n\nUse /subscribe &lt;STATE&gt; to start receiving notifications again.", count)
-			} else {
-				responseText = "ℹ️ You have no active subscriptions."
-			}
-		} else {
-			responseText = "❌ Invalid action"
-		}
-
-	case "manage":
-		responseText, keyboard = showManageSubscriptionsKeyboard(prefs, chatID)
-
-	case "settings":
-		responseText, keyboard = showSettingsKeyboard(prefs, chatID)
-
-	case "digest":
-		if user := prefs.GetUser(chatID); user != nil {
-			if user.SetDigestFrequency(param) {
-				*modified = true
-				responseText = fmt.Sprintf("✅ Digest frequency updated to <b>%s</b>", param)
-			} else {
-				responseText = "❌ Invalid digest frequency"
-			}
-		}
-
-	case "preview":
-		responseText = handlePreviewCallback(prefs, callback, modified, botToken, dryRun)
-
-	case "menu":
-		// Handle menu actions
-		responseText, keyboard = handleMenuCallback(param, prefs, chatID, botToken, dryRun, modified)
-
-	case "status":
-		// Handle event status update
-		responseText = handleStatusCallback(callback.Data, prefs, chatID, modified)
-
-	case "reminder":
-		// Handle reminder configuration
-		responseText, keyboard = handleReminderCallback(callback.Data, prefs, chatID, modified)
-
-	case "calendar":
-		// Calendar download - fetch event and send .ics file
-		responseText = handleCalendarCallback(param, chatID, botToken, dryRun)
-
-	case "bulk":
-		// Handle bulk actions
-		// Format: bulk:ACTION (e.g., "bulk:clear-skipped", "bulk:export-registered")
-		responseText, keyboard = handleBulkCallback(prefs, chatID, param, modified, botToken, dryRun)
-
-	case "ack-change":
-		// Acknowledge event change notification
-		// Format: ack-change:EVENT_ID
-		responseText = "✅ Change acknowledged. You can update your calendar if needed."
-
-	default:
-		responseText = "Unknown action"
-	}
-
-	// Answer the callback query
 	if !dryRun {
-		client, err := telegram.NewClient(botToken, chatID)
-		if err == nil {
-			if err := client.AnswerCallbackQuery(callback.ID, "", false); err != nil {
-				fmt.Fprintf(os.Stderr, "Error answering callback: %v\n", err)
-			}
-
-			// Edit the message with new text and keyboard
-			if messageID > 0 {
-				if err := client.EditMessageText(chatID, messageID, responseText, keyboard); err != nil {
-					fmt.Fprintf(os.Stderr, "Error editing message: %v\n", err)
-				}
-			} else {
-				// If no message ID, send new message
-				var sendErr error
-				if keyboard != nil {
-					sendErr = client.SendMessageWithKeyboard(responseText, keyboard)
-				} else {
-					sendErr = client.SendMessage(responseText)
-				}
-				if sendErr != nil {
-					fmt.Fprintf(os.Stderr, "Error sending message: %v\n", err)
-				}
-			}
-		}
+		sendCallbackResponse(botToken, chatID, callback.ID, messageID, responseText, keyboard)
 	} else {
 		fmt.Printf("[DRY RUN] Would answer callback and update message:\n%s\n\n", responseText)
 	}
 }
 
-//nolint:gocyclo // Command dispatcher naturally has high complexity due to many cases
+func handleHelpCommand(parts []string) (string, []*event.Event) {
+	if len(parts) >= 2 {
+		cmdName := strings.ToLower(strings.TrimPrefix(parts[1], "/"))
+		return getCommandHelp(cmdName), nil
+	}
+	return getHelpMessage(), nil
+}
+
+func handleUnsubscribeCommand(parts []string, prefs preferences.Preferences, chatID string, modified *bool, botToken string, dryRun bool) (string, []*event.Event) {
+	if len(parts) < 2 {
+		return "❌ Please specify a state code or 'all'.\n\nUsage: /unsubscribe NV\nUsage: /unsubscribe all", nil
+	}
+	arg := strings.ToLower(strings.TrimSpace(parts[1]))
+	if arg == "all" {
+		return handleUnsubscribeAllWithKeyboard(prefs, chatID, botToken, dryRun)
+	}
+	return handleUnsubscribe(prefs, chatID, parts[1], modified), nil
+}
+
+func validatedJoinedArgument(parts []string, maxLength int, fieldName string) (string, string) {
+	value := strings.Join(parts[1:], " ")
+	value = strings.Trim(value, `"'`)
+	return validateUserInput(value, maxLength, fieldName)
+}
+
+func handleSearchCommand(parts []string, prefs preferences.Preferences, chatID, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
+	if len(parts) < 2 {
+		return `🔍 <b>Event Search</b>
+
+Please provide a search keyword.
+
+<b>Usage:</b> /search &lt;keyword&gt;
+
+<b>Examples:</b>
+/search "Pine Valley"
+/search Championship
+/search Las Vegas
+/search NV`, nil
+	}
+
+	keyword, errMsg := validatedJoinedArgument(parts, 100, "Search keyword")
+	if errMsg != "" {
+		return errMsg, nil
+	}
+
+	return handleSearch(prefs, chatID, keyword, botToken, dryRun, modified)
+}
+
+func handleNoteCommand(parts []string, prefs preferences.Preferences, chatID string, modified *bool) (string, []*event.Event) {
+	if len(parts) < 2 {
+		return "❌ Please specify an event ID.\n\nUsage: /note &lt;event_id&gt; &lt;note_text&gt;\nUsage: /note &lt;event_id&gt; clear", nil
+	}
+	eventID := parts[1]
+
+	if len(parts) >= 3 && strings.ToLower(parts[2]) == "clear" {
+		return handleRemoveNote(prefs, chatID, eventID, modified)
+	}
+
+	if len(parts) < 3 {
+		return "❌ Please provide note text.\n\nUsage: /note &lt;event_id&gt; &lt;note_text&gt;", nil
+	}
+
+	noteText, errMsg := validateUserInput(strings.Join(parts[2:], " "), 500, "Note text")
+	if errMsg != "" {
+		return errMsg, nil
+	}
+
+	return handleAddNote(prefs, chatID, eventID, noteText, modified)
+}
+
+func handleNearCommand(parts []string, prefs preferences.Preferences, chatID, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
+	if len(parts) < 2 {
+		return "❌ Please specify a city name.\n\nUsage: /near &lt;city&gt;\n\nExamples:\n/near Las Vegas\n/near \"San Diego\"", nil
+	}
+
+	cityName, errMsg := validatedJoinedArgument(parts, 100, "City name")
+	if errMsg != "" {
+		return errMsg, nil
+	}
+
+	return handleNear(prefs, chatID, cityName, botToken, dryRun, modified)
+}
+
+func handleStatsCommand(parts []string, prefs preferences.Preferences, chatID string) (string, []*event.Event) {
+	period := "week"
+	if len(parts) >= 2 {
+		period = strings.ToLower(parts[1])
+	}
+	return handleStats(prefs, chatID, period), nil
+}
+
+func handleJoinCommand(parts []string, prefs preferences.Preferences, chatID string, modified *bool) (string, []*event.Event) {
+	if len(parts) < 2 {
+		return "❌ Please provide an invite code.\n\nUsage: /join <invite_code>", nil
+	}
+	return handleJoin(prefs, chatID, parts[1], modified), nil
+}
+
 func processCommand(prefs preferences.Preferences, chatID, text string, modified *bool, botToken string, dryRun bool) (string, []*event.Event) {
 	parts := strings.Fields(text)
 	if len(parts) == 0 {
@@ -776,153 +867,52 @@ func processCommand(prefs preferences.Preferences, chatID, text string, modified
 
 	switch command {
 	case "/start", "/help":
-		// Check if user requested help for a specific command
-		if len(parts) >= 2 {
-			cmdName := strings.ToLower(strings.TrimPrefix(parts[1], "/"))
-			return getCommandHelp(cmdName), nil
-		}
-		return getHelpMessage(), nil
-
+		return handleHelpCommand(parts)
 	case "/subscribe":
 		if len(parts) < 2 {
-			// Show state selection keyboard
 			return handleSubscribeWithKeyboard(chatID, botToken, dryRun)
 		}
 		return handleSubscribe(prefs, chatID, parts[1], modified, botToken, dryRun)
-
 	case "/unsubscribe":
-		if len(parts) < 2 {
-			return "❌ Please specify a state code or 'all'.\n\nUsage: /unsubscribe NV\nUsage: /unsubscribe all", nil
-		}
-		arg := strings.ToLower(strings.TrimSpace(parts[1]))
-		if arg == "all" {
-			// Show confirmation keyboard
-			return handleUnsubscribeAllWithKeyboard(prefs, chatID, botToken, dryRun)
-		}
-		return handleUnsubscribe(prefs, chatID, parts[1], modified), nil
-
+		return handleUnsubscribeCommand(parts, prefs, chatID, modified, botToken, dryRun)
 	case "/search":
-		if len(parts) < 2 {
-			return `🔍 <b>Event Search</b>
-
-Please provide a search keyword.
-
-<b>Usage:</b> /search &lt;keyword&gt;
-
-<b>Examples:</b>
-/search "Pine Valley"
-/search Championship
-/search Las Vegas
-/search NV`, nil
-		}
-		keyword := strings.Join(parts[1:], " ")
-		keyword = strings.Trim(keyword, `"'`) // Remove quotes if present
-
-		// Validate input
-		keyword, errMsg := validateUserInput(keyword, 100, "Search keyword")
-		if errMsg != "" {
-			return errMsg, nil
-		}
-
-		return handleSearch(prefs, chatID, keyword, botToken, dryRun, modified)
-
+		return handleSearchCommand(parts, prefs, chatID, botToken, dryRun, modified)
 	case "/export-calendar":
-		// Optional parameter: state code
 		var stateFilter string
 		if len(parts) >= 2 {
 			stateFilter = strings.ToUpper(strings.TrimSpace(parts[1]))
 		}
 		return handleExportCalendar(prefs, chatID, stateFilter, botToken, dryRun)
-
 	case "/note":
-		if len(parts) < 2 {
-			return "❌ Please specify an event ID.\n\nUsage: /note &lt;event_id&gt; &lt;note_text&gt;\nUsage: /note &lt;event_id&gt; clear", nil
-		}
-		eventID := parts[1]
-
-		// Check if second param is "clear"
-		if len(parts) >= 3 && strings.ToLower(parts[2]) == "clear" {
-			return handleRemoveNote(prefs, chatID, eventID, modified)
-		}
-
-		// Need note text
-		if len(parts) < 3 {
-			return "❌ Please provide note text.\n\nUsage: /note &lt;event_id&gt; &lt;note_text&gt;", nil
-		}
-
-		// Join remaining parts as note text
-		noteText := strings.Join(parts[2:], " ")
-
-		// Validate input
-		noteText, errMsg := validateUserInput(noteText, 500, "Note text")
-		if errMsg != "" {
-			return errMsg, nil
-		}
-
-		return handleAddNote(prefs, chatID, eventID, noteText, modified)
-
+		return handleNoteCommand(parts, prefs, chatID, modified)
 	case "/notes":
 		return handleListNotes(prefs, chatID, botToken, dryRun)
-
 	case "/near":
-		if len(parts) < 2 {
-			return "❌ Please specify a city name.\n\nUsage: /near &lt;city&gt;\n\nExamples:\n/near Las Vegas\n/near \"San Diego\"", nil
-		}
-		// Join remaining parts as city name (supports multi-word cities)
-		cityName := strings.Join(parts[1:], " ")
-		cityName = strings.Trim(cityName, `"'`) // Remove quotes if present
-
-		// Validate input
-		cityName, errMsg := validateUserInput(cityName, 100, "City name")
-		if errMsg != "" {
-			return errMsg, nil
-		}
-
-		return handleNear(prefs, chatID, cityName, botToken, dryRun, modified)
-
+		return handleNearCommand(parts, prefs, chatID, botToken, dryRun, modified)
 	case "/reminders":
 		return handleRemindersWithKeyboard(prefs, chatID, botToken, dryRun)
-
 	case "/notify-removals":
 		arg := ""
 		if len(parts) >= 2 {
 			arg = parts[1]
 		}
 		return handleNotifyRemovals(prefs, chatID, arg, modified)
-
 	case "/bulk":
-		// Handle bulk operations with subcommands
 		return processBulkCommand(parts, prefs, chatID, modified, botToken, dryRun)
 	case "/stats":
-		// Optional parameter: week, month, all
-		period := "week"
-		if len(parts) >= 2 {
-			period = strings.ToLower(parts[1])
-		}
-		return handleStats(prefs, chatID, period), nil
-
+		return handleStatsCommand(parts, prefs, chatID)
 	case "/check":
 		return handleCheck(prefs, chatID, botToken, dryRun, modified)
-
 	case "/invite":
 		return handleInvite(prefs, chatID), nil
-
 	case "/friends":
 		return handleFriends(prefs, chatID), nil
-
 	case "/join":
-		if len(parts) < 2 {
-			return "❌ Please provide an invite code.\n\nUsage: /join <invite_code>", nil
-		}
-		return handleJoin(prefs, chatID, parts[1], modified), nil
-
+		return handleJoinCommand(parts, prefs, chatID, modified)
 	case "/filter":
-		// Handle filter operations with subcommands
 		return processFilterCommand(parts, prefs, chatID, modified)
-
 	case "/filters":
 		return handleFiltersList(prefs, chatID)
-
 	default:
 		return fmt.Sprintf("Unknown command: %s\n\nUse /help to see available commands.", command), nil
 	}
@@ -1964,36 +1954,19 @@ func handleNear(prefs preferences.Preferences, chatID, cityName, botToken string
 		return "ℹ️ You need to subscribe to at least one state first.\n\nUse /subscribe &lt;STATE&gt; to get started.", nil
 	}
 
-	// Fetch current events
-	sc := scraper.New()
-	allEvents, err := sc.FetchEvents()
+	allEvents, err := fetchAllEvents()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
-		return "❌ Error fetching events. Please try again later.", nil
+		return errFetchingEvents, nil
 	}
 
-	// Filter events by subscribed states first
-	var subscribedEvents []*event.Event
-	for _, evt := range allEvents {
-		for _, state := range user.States {
-			if evt.State == state {
-				subscribedEvents = append(subscribedEvents, evt)
-				break
-			}
-		}
-	}
+	subscribedEvents := filterEventsByStates(allEvents, user.States)
 
 	// Filter by city (case-insensitive substring match)
 	normalizedCity := strings.ToLower(strings.TrimSpace(cityName))
 	var matchingEvents []*event.Event
 	for _, evt := range subscribedEvents {
 		if strings.Contains(strings.ToLower(evt.City), normalizedCity) {
-			// Apply user's date filter if enabled
-			if user.DaysAhead > 0 && !evt.IsWithinDays(user.DaysAhead) {
-				continue
-			}
-			// Filter past events if enabled
-			if user.HidePastEvents && evt.IsPastEvent() {
+			if !matchesUserEventVisibility(user, evt) {
 				continue
 			}
 			matchingEvents = append(matchingEvents, evt)
@@ -2007,42 +1980,18 @@ func handleNear(prefs preferences.Preferences, chatID, cityName, botToken string
 	// Sort by date
 	event.SortByDate(matchingEvents)
 
-	// Send header
-	client, err := telegram.NewClient(botToken, chatID)
-	if err != nil {
+	headerMsg := fmt.Sprintf("📍 <b>Events near %s</b>\n\nFound %d event(s) in your subscribed states:", cityName, len(matchingEvents))
+	if err := sendEventListWithStatus(prefs, user, chatID, botToken, headerMsg, matchingEvents, dryRun); err != nil {
+		if dryRun {
+			return fmt.Sprintf("[DRY RUN] Would send %d events near '%s'", len(matchingEvents), cityName), nil
+		}
 		return fmt.Sprintf("📍 <b>Events near %s</b>\n\nFound %d event(s)", cityName, len(matchingEvents)), nil
 	}
-
-	headerMsg := fmt.Sprintf("📍 <b>Events near %s</b>\n\nFound %d event(s) in your subscribed states:", cityName, len(matchingEvents))
-	if err := client.SendMessage(headerMsg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error sending header: %v\n", err)
+	if dryRun {
+		return fmt.Sprintf("[DRY RUN] Would send %d events near '%s'", len(matchingEvents), cityName), nil
 	}
 
-	// Send each event
-	for i, evt := range matchingEvents {
-		currentStatus := user.GetEventStatus(evt.ID)
-		note := user.GetEventNote(evt.ID)
-		msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, chatID, prefs)
-
-		if !dryRun {
-			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
-				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
-			}
-
-			// Rate limiting
-			if i < len(matchingEvents)-1 {
-				time.Sleep(1 * time.Second)
-			}
-		}
-	}
-
-	// Track stats: events viewed
-	if !dryRun {
-		user.IncrementEventsViewed(len(matchingEvents))
-		*modified = true
-	}
-
-	return "", nil // Already sent via messages
+	return markViewedEvents(user, len(matchingEvents), modified)
 }
 
 // handleListNotes lists all events with notes
@@ -2198,11 +2147,8 @@ Found %d new event(s) in %s:`, len(unseenEvents), statesText)
 }
 
 func handleSearch(prefs preferences.Preferences, chatID, keyword string, botToken string, dryRun bool, modified *bool) (string, []*event.Event) {
-	// Fetch all events
-	sc := scraper.New()
-	allEvents, err := sc.FetchEvents()
+	allEvents, err := fetchAllEvents()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
 		return errFetchingEvents, nil
 	}
 
@@ -2217,17 +2163,8 @@ func handleSearch(prefs preferences.Preferences, chatID, keyword string, botToke
 		}
 	}
 
-	// Apply past event filtering (default: hide past events)
 	user := prefs.GetUser(chatID)
-	if user.HidePastEvents {
-		var upcomingEvents []*event.Event
-		for _, evt := range matchingEvents {
-			if !evt.IsPastEvent() {
-				upcomingEvents = append(upcomingEvents, evt)
-			}
-		}
-		matchingEvents = upcomingEvents
-	}
+	matchingEvents = filterPastEventsForUser(user, matchingEvents)
 
 	if len(matchingEvents) == 0 {
 		return fmt.Sprintf(`🔍 <b>No Results</b>
@@ -2246,49 +2183,22 @@ Try a different search term or use /menu to see all upcoming events.`, keyword),
 		eventsToSend = eventsToSend[:10]
 	}
 
-	// Send results
-	if !dryRun {
-		client, err := telegram.NewClient(botToken, chatID)
-		if err != nil {
-			return "❌ Error sending results", nil
-		}
-
-		// Send header message
-		headerMsg := fmt.Sprintf(`🔍 <b>Search Results</b>
+	headerMsg := fmt.Sprintf(`🔍 <b>Search Results</b>
 
 Found %d event(s) matching "%s"
 
 Showing first %d results:`, len(matchingEvents), keyword, len(eventsToSend))
-
-		if err := client.SendMessage(headerMsg); err != nil {
-			fmt.Fprintf(os.Stderr, "Error sending header: %v\n", err)
+	if err := sendEventListWithStatus(prefs, user, chatID, botToken, headerMsg, eventsToSend, dryRun); err != nil {
+		if dryRun {
+			return fmt.Sprintf("[DRY RUN] Would send %d search results for '%s'", len(eventsToSend), keyword), nil
 		}
-
-		// Send each event with calendar button and subscribe option
-		for i, evt := range eventsToSend {
-			user := prefs.GetUser(chatID)
-			currentStatus := user.GetEventStatus(evt.ID)
-			note := user.GetEventNote(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, chatID, prefs)
-			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
-				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
-			}
-
-			// Rate limiting
-			if i < len(eventsToSend)-1 {
-				time.Sleep(1 * time.Second)
-			}
-		}
-
-		// Track stats: events viewed
-		user := prefs.GetUser(chatID)
-		user.IncrementEventsViewed(len(eventsToSend))
-		*modified = true
-
-		return "", nil // Already sent
+		return "❌ Error sending results", nil
+	}
+	if dryRun {
+		return fmt.Sprintf("[DRY RUN] Would send %d search results for '%s'", len(eventsToSend), keyword), nil
 	}
 
-	return fmt.Sprintf("[DRY RUN] Would send %d search results for '%s'", len(eventsToSend), keyword), nil
+	return markViewedEvents(user, len(eventsToSend), modified)
 }
 
 func handleExportCalendar(prefs preferences.Preferences, chatID, stateFilter string, botToken string, dryRun bool) (string, []*event.Event) {
@@ -2590,36 +2500,15 @@ You're not subscribed to any states yet.
 Use /subscribe to start receiving events!`, nil
 	}
 
-	// Fetch all events
-	sc := scraper.New()
-	allEvents, err := sc.FetchEvents()
+	allEvents, err := fetchAllEvents()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
 		return errFetchingEvents, nil
 	}
 
-	// Filter events by subscribed states
-	var filteredEvents []*event.Event
-	for _, evt := range allEvents {
-		for _, state := range states {
-			if state == AllStatesCode || strings.EqualFold(evt.State, state) {
-				filteredEvents = append(filteredEvents, evt)
-				break
-			}
-		}
-	}
+	filteredEvents := filterEventsByStates(allEvents, states)
 
-	// Apply past event filtering (default: hide past events)
 	user := prefs.GetUser(chatID)
-	if user.HidePastEvents {
-		var upcomingEvents []*event.Event
-		for _, evt := range filteredEvents {
-			if !evt.IsPastEvent() {
-				upcomingEvents = append(upcomingEvents, evt)
-			}
-		}
-		filteredEvents = upcomingEvents
-	}
+	filteredEvents = filterPastEventsForUser(user, filteredEvents)
 
 	// Apply user's active filter if any
 	filteredEvents = user.ApplyFiltersToEvents(filteredEvents)
@@ -2653,48 +2542,110 @@ Check back later or subscribe to more states with /subscribe`, strings.Join(stat
 		eventsToSend = eventsToSend[:50]
 	}
 
-	// Send events with status tracking buttons
-	if !dryRun {
-		client, err := telegram.NewClient(botToken, chatID)
-		if err != nil {
-			return "❌ Error sending events", nil
-		}
-
-		// Send header message
-		headerMsg := fmt.Sprintf(`📅 <b>All Events</b>
+	headerMsg := fmt.Sprintf(`📅 <b>All Events</b>
 
 Found %d event(s) for %s%s
 
 Showing %d event(s), sorted by date:`, len(filteredEvents), strings.Join(states, ", "), filterStatus, len(eventsToSend))
-
-		if err := client.SendMessage(headerMsg); err != nil {
-			fmt.Fprintf(os.Stderr, "Error sending header: %v\n", err)
+	if err := sendEventListWithStatus(prefs, user, chatID, botToken, headerMsg, eventsToSend, dryRun); err != nil {
+		if dryRun {
+			return fmt.Sprintf("[DRY RUN] Would send %d events for %s", len(eventsToSend), strings.Join(states, ", ")), nil
 		}
-
-		// Send each event with status buttons
-		user := prefs.GetUser(chatID)
-		for i, evt := range eventsToSend {
-			currentStatus := user.GetEventStatus(evt.ID)
-			note := user.GetEventNote(evt.ID)
-			msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, chatID, prefs)
-			if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
-				fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
-			}
-
-			// Rate limiting
-			if i < len(eventsToSend)-1 {
-				time.Sleep(1 * time.Second)
-			}
-		}
-
-		// Track stats: events viewed
-		user.IncrementEventsViewed(len(eventsToSend))
-		*modified = true
-
-		return "", nil // Already sent
+		return "❌ Error sending events", nil
+	}
+	if dryRun {
+		return fmt.Sprintf("[DRY RUN] Would send %d events for %s", len(eventsToSend), strings.Join(states, ", ")), nil
 	}
 
-	return fmt.Sprintf("[DRY RUN] Would send %d events for %s", len(eventsToSend), strings.Join(states, ", ")), nil
+	return markViewedEvents(user, len(eventsToSend), modified)
+}
+
+func fetchAllEvents() ([]*event.Event, error) {
+	sc := scraper.New()
+	allEvents, err := sc.FetchEvents()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching events: %v\n", err)
+		return nil, err
+	}
+
+	return allEvents, nil
+}
+
+func filterEventsByStates(events []*event.Event, states []string) []*event.Event {
+	var filteredEvents []*event.Event
+	for _, evt := range events {
+		for _, state := range states {
+			if state == AllStatesCode || strings.EqualFold(evt.State, state) {
+				filteredEvents = append(filteredEvents, evt)
+				break
+			}
+		}
+	}
+
+	return filteredEvents
+}
+
+func matchesUserEventVisibility(user *preferences.UserPreferences, evt *event.Event) bool {
+	if user.DaysAhead > 0 && !evt.IsWithinDays(user.DaysAhead) {
+		return false
+	}
+
+	if user.HidePastEvents && evt.IsPastEvent() {
+		return false
+	}
+
+	return true
+}
+
+func filterPastEventsForUser(user *preferences.UserPreferences, events []*event.Event) []*event.Event {
+	if !user.HidePastEvents {
+		return events
+	}
+
+	var upcomingEvents []*event.Event
+	for _, evt := range events {
+		if !evt.IsPastEvent() {
+			upcomingEvents = append(upcomingEvents, evt)
+		}
+	}
+
+	return upcomingEvents
+}
+
+func sendEventListWithStatus(prefs preferences.Preferences, user *preferences.UserPreferences, chatID, botToken, headerMsg string, events []*event.Event, dryRun bool) error {
+	if dryRun {
+		return nil
+	}
+
+	client, err := telegram.NewClient(botToken, chatID)
+	if err != nil {
+		return err
+	}
+
+	if err := client.SendMessage(headerMsg); err != nil {
+		fmt.Fprintf(os.Stderr, "Error sending header: %v\n", err)
+	}
+
+	for i, evt := range events {
+		currentStatus := user.GetEventStatus(evt.ID)
+		note := user.GetEventNote(evt.ID)
+		msg, keyboard := telegram.FormatEventWithStatusAndNote(evt, currentStatus, note, chatID, prefs)
+		if err := client.SendMessageWithKeyboard(msg, keyboard); err != nil {
+			fmt.Fprintf(os.Stderr, "Error sending event %s: %v\n", evt.ID, err)
+		}
+
+		if i < len(events)-1 {
+			time.Sleep(1 * time.Second)
+		}
+	}
+
+	return nil
+}
+
+func markViewedEvents(user *preferences.UserPreferences, count int, modified *bool) (string, []*event.Event) {
+	user.IncrementEventsViewed(count)
+	*modified = true
+	return "", nil
 }
 
 // buildEventPreviewKeyboard returns a keyboard asking how many events to preview

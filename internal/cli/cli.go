@@ -171,62 +171,143 @@ func handleShowAll(currentEvents []*event.Event, state string, format OutputForm
 	return nil
 }
 
-// runCheck is the main command logic
-// nolint:gocyclo // TODO: Refactor to reduce complexity
-func runCheck(cmd *cobra.Command, args []string) error {
-	// Normalize state code
+func validateRunConfig() (string, OutputFormat, SortOrder, error) {
 	state := strings.ToUpper(strings.TrimSpace(flagCheckState))
 	if state == "" {
-		return fmt.Errorf("--check-state is required")
+		return "", "", "", fmt.Errorf("--check-state is required")
 	}
 
-	// Validate format
 	format := OutputFormat(strings.ToLower(flagFormat))
 	if format != FormatText && format != FormatJSON {
-		return fmt.Errorf("invalid format: %s (must be 'text' or 'json')", flagFormat)
+		return "", "", "", fmt.Errorf("invalid format: %s (must be 'text' or 'json')", flagFormat)
 	}
 
-	// Validate sort order
 	sortOrder := SortOrder(strings.ToLower(flagSort))
 	if sortOrder != SortByDate && sortOrder != SortByState && sortOrder != SortByTitle {
-		return fmt.Errorf("invalid sort order: %s (must be 'date', 'state', or 'title')", flagSort)
+		return "", "", "", fmt.Errorf("invalid sort order: %s (must be 'date', 'state', or 'title')", flagSort)
 	}
 
-	if flagVerbose {
-		fmt.Fprintf(os.Stderr, "Checking state: %s\n", state)
-		fmt.Fprintf(os.Stderr, "Data directory: %s\n", flagDataDir)
-		fmt.Fprintf(os.Stderr, "Sort order: %s\n", sortOrder)
+	return state, format, sortOrder, nil
+}
+
+func logRunConfig(state string, sortOrder SortOrder) {
+	if !flagVerbose {
+		return
 	}
 
-	// Initialize storage
-	store, err := storage.New(flagDataDir)
-	if err != nil {
-		return fmt.Errorf("initializing storage: %w", err)
-	}
+	fmt.Fprintf(os.Stderr, "Checking state: %s\n", state)
+	fmt.Fprintf(os.Stderr, "Data directory: %s\n", flagDataDir)
+	fmt.Fprintf(os.Stderr, "Sort order: %s\n", sortOrder)
+}
 
-	// Initialize scraper
+func fetchCurrentEvents() ([]*event.Event, error) {
 	sc := scraper.New()
 
-	// Fetch current events
 	if flagVerbose {
 		fmt.Fprintf(os.Stderr, "Fetching events from %s\n", scraper.StateEventsURL)
 	}
 
 	currentEvents, err := sc.FetchEvents()
 	if err != nil {
-		return fmt.Errorf("fetching events: %w", err)
+		return nil, fmt.Errorf("fetching events: %w", err)
 	}
 
 	if flagVerbose {
 		fmt.Fprintf(os.Stderr, "Fetched %d total events\n", len(currentEvents))
 	}
 
-	// Handle --show-all mode
+	return currentEvents, nil
+}
+
+func detectChangedEvents(previous *event.Snapshot, eventsToSave []*event.Event, newSnapshot *event.Snapshot) []*event.EventChange {
+	if previous == nil {
+		return nil
+	}
+
+	currentEventsMap := make(map[string]*event.Event)
+	for _, evt := range eventsToSave {
+		currentEventsMap[evt.ID] = evt
+	}
+
+	changedEvents := event.CompareSnapshots(previous.Events, currentEventsMap, previous.StableIndex, newSnapshot.StableIndex)
+	filteredChanges := make([]*event.EventChange, 0, len(changedEvents))
+	for _, change := range changedEvents {
+		if change.ChangeType != "new" && change.ChangeType != "removed" {
+			filteredChanges = append(filteredChanges, change)
+		}
+	}
+
+	newSnapshot.ChangeLog = append(newSnapshot.ChangeLog, filteredChanges...)
+	if len(newSnapshot.ChangeLog) > 100 {
+		newSnapshot.ChangeLog = newSnapshot.ChangeLog[len(newSnapshot.ChangeLog)-100:]
+	}
+
+	return filteredChanges
+}
+
+func buildDiffOutputResult(state string, diff *event.DiffResult, changedEvents []*event.EventChange) *OutputResult {
+	result := &OutputResult{
+		CheckedAt:     time.Now().UTC(),
+		NewEvents:     diff.NewEvents,
+		RemovedEvents: diff.RemovedEvents,
+		ChangedEvents: changedEvents,
+		EventCount:    len(diff.NewEvents),
+	}
+
+	if state == StateAll {
+		states := make([]string, 0, len(diff.States))
+		for s := range diff.States {
+			states = append(states, s)
+		}
+		result.States = states
+		result.ByState = diff.States
+		return result
+	}
+
+	result.States = []string{state}
+	if len(diff.NewEvents) > 0 {
+		result.ByState = map[string][]*event.Event{
+			state: diff.NewEvents,
+		}
+	}
+
+	return result
+}
+
+func handleRefreshOutput(result *OutputResult, format OutputFormat) {
+	if format == FormatText {
+		fmt.Println("Snapshot refreshed successfully.")
+	} else {
+		result.NewEvents = nil
+		result.EventCount = 0
+		result.ByState = nil
+		_ = WriteOutput(os.Stdout, result, format, flagVerbose)
+	}
+	os.Exit(ExitSuccess)
+}
+
+// runCheck is the main command logic
+func runCheck(cmd *cobra.Command, args []string) error {
+	state, format, sortOrder, err := validateRunConfig()
+	if err != nil {
+		return err
+	}
+	logRunConfig(state, sortOrder)
+
+	store, err := storage.New(flagDataDir)
+	if err != nil {
+		return fmt.Errorf("initializing storage: %w", err)
+	}
+
+	currentEvents, err := fetchCurrentEvents()
+	if err != nil {
+		return err
+	}
+
 	if flagShowAll {
 		return handleShowAll(currentEvents, state, format, flagVerbose, sortOrder, store)
 	}
 
-	// Load previous snapshot
 	var previous *event.Snapshot
 	if !flagRefresh {
 		previous, err = store.LoadSnapshot(state)
@@ -239,64 +320,22 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Compute diff
 	diff := event.Diff(previous, currentEvents, state)
-
-	// Sort new events
 	sortEvents(diff.NewEvents, sortOrder)
-
-	// Sort events within each state group
 	if state == StateAll {
 		for _, events := range diff.States {
 			sortEvents(events, sortOrder)
 		}
 	}
 
-	// Filter events by state before saving snapshot
 	eventsToSave := filterEventsByState(currentEvents, state)
-
-	// Create new snapshot with filtered events
 	newSnapshot := event.CreateSnapshot(eventsToSave, time.Now().UTC().Format(time.RFC3339))
+	changedEvents := detectChangedEvents(previous, eventsToSave, newSnapshot)
 
-	// Detect changes between snapshots (date/title/city changes)
-	var changedEvents []*event.EventChange
-	if previous != nil {
-		// Build current events map for change detection
-		currentEventsMap := make(map[string]*event.Event)
-		for _, evt := range eventsToSave {
-			currentEventsMap[evt.ID] = evt
-		}
-
-		// Compare snapshots to detect changes
-		changedEvents = event.CompareSnapshots(previous.Events, currentEventsMap, previous.StableIndex, newSnapshot.StableIndex)
-
-		// Filter out "new" and "removed" change types - those are handled separately
-		filteredChanges := make([]*event.EventChange, 0)
-		for _, change := range changedEvents {
-			if change.ChangeType != "new" && change.ChangeType != "removed" {
-				filteredChanges = append(filteredChanges, change)
-			}
-		}
-		changedEvents = filteredChanges
-
-		// Store changes in the new snapshot's ChangeLog
-		newSnapshot.ChangeLog = append(newSnapshot.ChangeLog, changedEvents...)
-
-		// Keep only the most recent 100 changes to prevent unbounded growth
-		if len(newSnapshot.ChangeLog) > 100 {
-			newSnapshot.ChangeLog = newSnapshot.ChangeLog[len(newSnapshot.ChangeLog)-100:]
-		}
-	}
-
-	// Store removed events in snapshot (kept for 30 days)
 	if len(diff.RemovedEvents) > 0 {
 		newSnapshot.StoreRemovedEvents(diff.RemovedEvents)
 	}
-
-	// Clean up old removed events (>30 days old)
 	newSnapshot.CleanupRemovedEvents()
-
-	// Save updated snapshot
 	if err := store.SaveSnapshot(newSnapshot, state); err != nil {
 		return fmt.Errorf("saving snapshot: %w", err)
 	}
@@ -305,53 +344,17 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Saved snapshot\n")
 	}
 
-	// Prepare output
-	result := &OutputResult{
-		CheckedAt:     time.Now().UTC(),
-		NewEvents:     diff.NewEvents,
-		RemovedEvents: diff.RemovedEvents,
-		ChangedEvents: changedEvents,
-		EventCount:    len(diff.NewEvents),
-	}
+	result := buildDiffOutputResult(state, diff, changedEvents)
 
-	// Determine states checked
-	if state == StateAll {
-		states := make([]string, 0, len(diff.States))
-		for s := range diff.States {
-			states = append(states, s)
-		}
-		result.States = states
-		result.ByState = diff.States
-	} else {
-		result.States = []string{state}
-		if len(diff.NewEvents) > 0 {
-			result.ByState = map[string][]*event.Event{
-				state: diff.NewEvents,
-			}
-		}
-	}
-
-	// In refresh mode, don't output new events
 	if flagRefresh {
-		if format == FormatText {
-			fmt.Println("Snapshot refreshed successfully.")
-		} else {
-			// Still output JSON but with zero new events
-			result.NewEvents = nil
-			result.EventCount = 0
-			result.ByState = nil
-			_ = WriteOutput(os.Stdout, result, format, flagVerbose)
-		}
-		os.Exit(ExitSuccess)
+		handleRefreshOutput(result, format)
 		return nil
 	}
 
-	// Write output
 	if err := WriteOutput(os.Stdout, result, format, flagVerbose); err != nil {
 		return fmt.Errorf("writing output: %w", err)
 	}
 
-	// Set exit code based on whether new events were found
 	if len(diff.NewEvents) > 0 {
 		os.Exit(ExitNewEvents)
 	} else {

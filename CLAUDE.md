@@ -20,7 +20,15 @@ Welcome to the VGA Events Bot project documentation. This interactive Telegram b
 
 ## Project Overview
 
-**Current Version:** v0.8.2
+**Current Version:** v0.8.3
+
+**v0.8.3**
+
+- Upgraded the project baseline and workflow toolchains to Go `1.26.2`.
+- Hardened automation that opens pull requests so scheduled maintenance workflows can fall back cleanly when repository PR permissions are restricted.
+- Reduced complexity in the Telegram bot command and callback dispatchers by extracting smaller helpers around parsing, routing, and shared event-list delivery.
+- Refactored the preferences model into focused embedded groups, reducing `UserPreferences` sprawl without breaking existing callers or stored JSON.
+- Removed repeated GitHub API request setup, scraper parsing branches, CLI orchestration steps, and Telegram HTTP test boilerplate identified in the April 2026 refactoring report.
 
 **v0.8.2**
 

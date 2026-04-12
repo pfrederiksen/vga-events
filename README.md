@@ -286,7 +286,7 @@ When you receive event notifications, use the status buttons to track them:
 ### GitHub Actions Setup (Automated Notifications)
 
 The bot runs on GitHub Actions - no server needed! It:
-- Checks for commands every 15 minutes
+- Runs the command processor every 6 hours with long polling for continuous coverage
 - Checks for new events every hour
 - Sends personalized notifications to each user based on their subscriptions
 
@@ -315,7 +315,7 @@ The bot runs on GitHub Actions - no server needed! It:
    - `GOLF_COURSE_API_KEY` - (Optional) API key from golfcourseapi.com for course info
 
 3. The workflows will start running automatically:
-   - Commands processed every 15 minutes
+   - Command processor restarted every 6 hours and long-polls for ~5.5 hours per run
    - Notifications sent hourly
 
 ### Local Testing
@@ -369,7 +369,7 @@ The bot includes multiple security layers:
 ### How It Works
 
 1. **User subscribes** via `/subscribe NV` command
-2. **Bot processes command** (runs every 15 minutes via GitHub Actions)
+2. **Bot processes command** (GitHub Actions restarts the long-polling command processor every 6 hours)
 3. **Preferences stored** in private GitHub Gist (encrypted if key provided)
 4. **Event checking** runs hourly via GitHub Actions
 5. **Personalized notifications** sent only for subscribed states

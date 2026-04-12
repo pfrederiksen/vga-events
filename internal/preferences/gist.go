@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -53,17 +54,39 @@ func NewGistStorageWithEncryption(gistID, githubToken, encryptionKey string) (*G
 	}, nil
 }
 
-// Load retrieves preferences from the Gist
-func (g *GistStorage) Load() (Preferences, error) {
-	url := fmt.Sprintf("%s/%s", gistAPIURL, g.gistID)
-
-	req, err := http.NewRequest("GET", url, nil)
+func newGitHubAPIRequest(method, url, githubToken string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("token %s", g.githubToken))
+	req.Header.Set("Authorization", fmt.Sprintf("token %s", githubToken))
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	return req, nil
+}
+
+func checkGitHubAPIStatus(resp *http.Response, expectedStatus int) error {
+	if resp.StatusCode != expectedStatus {
+		// Don't include response body in error to prevent information leakage
+		return fmt.Errorf("GitHub API error (status %d)", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// Load retrieves preferences from the Gist
+func (g *GistStorage) Load() (Preferences, error) {
+	url := fmt.Sprintf("%s/%s", gistAPIURL, g.gistID)
+
+	req, err := newGitHubAPIRequest("GET", url, g.githubToken, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	resp, err := g.httpClient.Do(req)
 	if err != nil {
@@ -71,9 +94,8 @@ func (g *GistStorage) Load() (Preferences, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		// Don't include response body in error to prevent information leakage
-		return nil, fmt.Errorf("GitHub API error (status %d)", resp.StatusCode)
+	if err := checkGitHubAPIStatus(resp, http.StatusOK); err != nil {
+		return nil, err
 	}
 
 	var gistResp struct {
@@ -154,14 +176,10 @@ func (g *GistStorage) Save(prefs Preferences) error {
 		return fmt.Errorf("marshaling payload: %w", err)
 	}
 
-	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(payloadBytes))
+	req, err := newGitHubAPIRequest("PATCH", url, g.githubToken, bytes.NewBuffer(payloadBytes))
 	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
+		return err
 	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("token %s", g.githubToken))
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := g.httpClient.Do(req)
 	if err != nil {
@@ -169,9 +187,8 @@ func (g *GistStorage) Save(prefs Preferences) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		// Don't include response body in error to prevent information leakage
-		return fmt.Errorf("GitHub API error (status %d)", resp.StatusCode)
+	if err := checkGitHubAPIStatus(resp, http.StatusOK); err != nil {
+		return err
 	}
 
 	return nil
@@ -204,14 +221,10 @@ func CreateGist(githubToken, description string) (string, error) {
 		return "", fmt.Errorf("marshaling payload: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", gistAPIURL, bytes.NewBuffer(payloadBytes))
+	req, err := newGitHubAPIRequest("POST", gistAPIURL, githubToken, bytes.NewBuffer(payloadBytes))
 	if err != nil {
-		return "", fmt.Errorf("creating request: %w", err)
+		return "", err
 	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("token %s", githubToken))
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
@@ -220,9 +233,8 @@ func CreateGist(githubToken, description string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusCreated {
-		// Don't include response body in error to prevent information leakage
-		return "", fmt.Errorf("GitHub API error (status %d)", resp.StatusCode)
+	if err := checkGitHubAPIStatus(resp, http.StatusCreated); err != nil {
+		return "", err
 	}
 
 	var gistResp struct {

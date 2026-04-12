@@ -118,35 +118,35 @@ func (s *Scraper) parseEvents(r io.Reader, sourceURL string) ([]*event.Event, er
 
 		// Check for date + event on same line (with city)
 		if matches := dateEventPattern.FindStringSubmatch(line); matches != nil {
-			dateText := strings.TrimSpace(matches[1])
-			state := matches[2]
-			title := strings.TrimSpace(matches[3])
-			city := strings.TrimSpace(matches[4])
-
-			// Extract raw event line without the date prefix
-			rawLine := strings.TrimSpace(strings.TrimPrefix(line, "["+matches[1]+"]"))
-
-			evt := event.NewEvent(state, title, dateText, city, rawLine, sourceURL)
-			events = append(events, evt)
+			events = append(events, newEventWithDatePrefix(
+				matches[2],
+				strings.TrimSpace(matches[3]),
+				strings.TrimSpace(matches[1]),
+				strings.TrimSpace(matches[4]),
+				line,
+				matches[1],
+				sourceURL,
+			))
 			continue
 		}
 
 		// Check for date + event on same line (without city)
 		if matches := dateEventPatternNoCity.FindStringSubmatch(line); matches != nil {
-			dateText := strings.TrimSpace(matches[1])
-			state := matches[2]
 			title := strings.TrimSpace(matches[3])
 
-			// Skip if this looks like it might be part of a different pattern
-			if strings.Contains(title, "http") || len(title) < 5 {
+			if isInvalidStandaloneTitle(title) {
 				continue
 			}
 
-			// Extract raw event line without the date prefix
-			rawLine := strings.TrimSpace(strings.TrimPrefix(line, "["+matches[1]+"]"))
-
-			evt := event.NewEvent(state, title, dateText, "", rawLine, sourceURL)
-			events = append(events, evt)
+			events = append(events, newEventWithDatePrefix(
+				matches[2],
+				title,
+				strings.TrimSpace(matches[1]),
+				"",
+				line,
+				matches[1],
+				sourceURL,
+			))
 			continue
 		}
 
@@ -158,40 +158,35 @@ func (s *Scraper) parseEvents(r io.Reader, sourceURL string) ([]*event.Event, er
 
 		// Try pattern with city
 		if matches := stateEventPattern.FindStringSubmatch(line); matches != nil {
-			state := matches[1]
 			title := strings.TrimSpace(matches[2])
-			city := strings.TrimSpace(matches[3])
-
-			// Use bracketed date if available, otherwise extract from title
-			dateText := currentDate
-			if dateText == "" {
-				dateText = extractDate(title)
-			}
-
-			evt := event.NewEvent(state, title, dateText, city, line, sourceURL)
-			events = append(events, evt)
+			events = append(events, event.NewEvent(
+				matches[1],
+				title,
+				resolveEventDate(currentDate, title),
+				strings.TrimSpace(matches[3]),
+				line,
+				sourceURL,
+			))
 			currentDate = "" // Reset after use
 			continue
 		}
 
 		// Try pattern without city
 		if matches := stateEventPatternNoCity.FindStringSubmatch(line); matches != nil {
-			state := matches[1]
 			title := strings.TrimSpace(matches[2])
 
-			// Skip if this looks like it might be part of a different pattern
-			if strings.Contains(title, "http") || len(title) < 5 {
+			if isInvalidStandaloneTitle(title) {
 				continue
 			}
 
-			// Use bracketed date if available, otherwise extract from title
-			dateText := currentDate
-			if dateText == "" {
-				dateText = extractDate(title)
-			}
-
-			evt := event.NewEvent(state, title, dateText, "", line, sourceURL)
-			events = append(events, evt)
+			events = append(events, event.NewEvent(
+				matches[1],
+				title,
+				resolveEventDate(currentDate, title),
+				"",
+				line,
+				sourceURL,
+			))
 			currentDate = "" // Reset after use
 		}
 	}
@@ -207,6 +202,29 @@ func (s *Scraper) parseEvents(r io.Reader, sourceURL string) ([]*event.Event, er
 	}
 
 	return unique, nil
+}
+
+func newEventWithDatePrefix(state, title, dateText, city, rawLine, datePrefix, sourceURL string) *event.Event {
+	return event.NewEvent(
+		state,
+		title,
+		dateText,
+		city,
+		strings.TrimSpace(strings.TrimPrefix(rawLine, "["+datePrefix+"]")),
+		sourceURL,
+	)
+}
+
+func isInvalidStandaloneTitle(title string) bool {
+	return strings.Contains(title, "http") || len(title) < 5
+}
+
+func resolveEventDate(currentDate, title string) string {
+	if currentDate != "" {
+		return currentDate
+	}
+
+	return extractDate(title)
 }
 
 // extractDate attempts to extract date text from a title

@@ -11,6 +11,11 @@ permissions:
   pull-requests: write
   issues: write
 
+env:
+  # Use a PAT when repository settings disallow pull request creation from
+  # the default GITHUB_TOKEN. Fall back to GITHUB_TOKEN when the PAT is unset.
+  AUTOMATION_PR_TOKEN: ${{ secrets.AUTOMATION_PR_TOKEN || secrets.GITHUB_TOKEN }}
+
 jobs:
   update-dependencies:
     name: Update Go Dependencies
@@ -22,7 +27,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26.2'
 
       - name: Check for updates
         id: check
@@ -105,16 +110,39 @@ jobs:
           gh label create automated --color 5319e7 --description "Automated workflow changes" --force
 
       - name: Create Pull Request
+        id: create_dependency_pr
+        continue-on-error: true
         if: steps.check.outputs.updates > 0
         uses: peter-evans/create-pull-request@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ env.AUTOMATION_PR_TOKEN }}
           commit-message: "Deps: Update Go dependencies"
           branch: deps/auto-update-${{ github.run_number }}
           title: "Update Go dependencies (automated)"
           body-path: report.md
           labels: dependencies,automated
           assignees: pfrederiksen
+
+      - name: Report PR creation failure
+        if: steps.check.outputs.updates > 0 && steps.create_dependency_pr.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="deps/auto-update-${{ github.run_number }}"
+          gh issue create \
+            --title "Dependency update PR requires Actions PR permission" \
+            --body "The dependency update workflow pushed branch \`$BRANCH\` but could not open a pull request.
+
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Branch: ${{ github.server_url }}/${{ github.repository }}/tree/$BRANCH
+
+          To restore automatic PR creation, do one of the following:
+          - Enable repository setting: Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests
+          - Add a PAT secret named \`AUTOMATION_PR_TOKEN\` with \`repo\` scope for PR creation
+
+          This issue was created automatically so the update is still visible even when PR creation is blocked." \
+            --label dependencies \
+            --label automated
 
   update-github-actions:
     name: Update GitHub Actions
@@ -153,15 +181,39 @@ jobs:
           gh label create automated --color 5319e7 --description "Automated workflow changes" --force
 
       - name: Open Actions update PR
+        id: create_actions_pr
+        continue-on-error: true
         if: steps.check-actions.outputs.outdated > 0
         uses: peter-evans/create-pull-request@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ env.AUTOMATION_PR_TOKEN }}
           commit-message: "Deps: Update GitHub Actions versions"
           branch: deps/update-actions-${{ github.run_number }}
           title: "Update GitHub Actions (automated)"
           body-path: actions-report.md
           labels: dependencies,github-actions,automated
+
+      - name: Report Actions PR creation failure
+        if: steps.check-actions.outputs.outdated > 0 && steps.create_actions_pr.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="deps/update-actions-${{ github.run_number }}"
+          gh issue create \
+            --title "Actions dependency PR requires Actions PR permission" \
+            --body "The GitHub Actions update workflow pushed branch \`$BRANCH\` but could not open a pull request.
+
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Branch: ${{ github.server_url }}/${{ github.repository }}/tree/$BRANCH
+
+          To restore automatic PR creation, do one of the following:
+          - Enable repository setting: Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests
+          - Add a PAT secret named \`AUTOMATION_PR_TOKEN\` with \`repo\` scope for PR creation
+
+          This issue was created automatically so the update is still visible even when PR creation is blocked." \
+            --label dependencies \
+            --label github-actions \
+            --label automated
 
   check-go-version:
     name: Check Go Version
@@ -225,7 +277,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26.2'
 
       - name: Check for CVEs
         run: |

@@ -25,58 +25,61 @@ const (
 
 // UserPreferences represents a user's subscription preferences
 type UserPreferences struct {
-	// Core subscription settings
+	CorePreferences
+	DigestPreferences
+	EventDisplayPreferences
+	EventInteractionPreferences
+	NotificationPreferences
+	StatsPreferences
+	SocialPreferences
+	FilterPreferences
+}
+
+type CorePreferences struct {
 	States []string `json:"states"`
 	Active bool     `json:"active"`
+}
 
-	// Event history tracking (Feature 1)
-	// Key: event.ID, Value: Unix timestamp when first seen
-	SeenEventIDs map[string]int64 `json:"seen_event_ids,omitempty"`
+type DigestPreferences struct {
+	SeenEventIDs    map[string]int64 `json:"seen_event_ids,omitempty"`     // event.ID -> first seen Unix timestamp
+	DigestFrequency string           `json:"digest_frequency,omitempty"`   // "immediate", "daily", "weekly"
+	DigestDayOfWeek int              `json:"digest_day_of_week,omitempty"` // 0-6 for weekly digest
+	DigestHour      int              `json:"digest_hour,omitempty"`        // 0-23 UTC
+	PendingEvents   []*event.Event   `json:"pending_events,omitempty"`     // Events queued for digest
+}
 
-	// Digest mode configuration (Feature 4)
-	DigestFrequency string         `json:"digest_frequency,omitempty"`   // "immediate", "daily", "weekly"
-	DigestDayOfWeek int            `json:"digest_day_of_week,omitempty"` // 0-6 for weekly digest
-	DigestHour      int            `json:"digest_hour,omitempty"`        // 0-23 UTC
-	PendingEvents   []*event.Event `json:"pending_events,omitempty"`     // Events queued for digest
-
-	// Time-based filtering (Feature 3)
+type EventDisplayPreferences struct {
 	DaysAhead      int  `json:"days_ahead,omitempty"`       // 0 = disabled, >0 = only show events within N days
 	HidePastEvents bool `json:"hide_past_events,omitempty"` // Default: true
+}
 
-	// Event status tracking (Feature 9)
-	// Key: event.ID, Value: status ("interested", "registered", "maybe", "skip")
-	EventStatuses map[string]string `json:"event_statuses,omitempty"`
+type EventInteractionPreferences struct {
+	EventStatuses map[string]string `json:"event_statuses,omitempty"` // event.ID -> status
+	ReminderDays  []int             `json:"reminder_days,omitempty"`  // e.g. [1, 3, 7]
+	EventNotes    map[string]string `json:"event_notes,omitempty"`    // event.ID -> user note
+}
 
-	// Event reminders (Week 3)
-	// Days before event to send reminders (e.g., [1, 3, 7] means 1 day, 3 days, and 1 week before)
-	ReminderDays []int `json:"reminder_days,omitempty"`
-
-	// Personal event notes
-	// Key: event.ID, Value: user's personal note
-	EventNotes map[string]string `json:"event_notes,omitempty"`
-
-	// Change notifications (v0.5.0 Enhancement #3)
-	// Whether to be notified when tracked events change (date, title, city)
+type NotificationPreferences struct {
 	NotifyOnChanges bool `json:"notify_on_changes"` // Default: true
-
-	// Removal notifications
-	// Whether to be notified when events are removed from the VGA website
 	NotifyOnRemoval bool `json:"notify_on_removal"` // Default: true
+}
 
-	// Weekly statistics (v0.5.0 Enhancement #4)
+type StatsPreferences struct {
 	WeeklyStats  *WeeklyStats            `json:"weekly_stats,omitempty"`
-	StatsHistory map[string]*WeeklyStats `json:"stats_history,omitempty"` // week key → stats
+	StatsHistory map[string]*WeeklyStats `json:"stats_history,omitempty"` // week key -> stats
 	EnableStats  bool                    `json:"enable_stats"`            // Default: true
+}
 
-	// Friends and sharing (v0.5.0 Enhancement #7)
+type SocialPreferences struct {
 	FriendChatIDs      []string            `json:"friend_chat_ids,omitempty"`     // List of friend chat IDs
-	PendingInvites     map[string]string   `json:"pending_invites,omitempty"`     // invite code → sender chat ID
+	PendingInvites     map[string]string   `json:"pending_invites,omitempty"`     // invite code -> sender chat ID
 	ShareEvents        bool                `json:"share_events,omitempty"`        // Default: false (privacy)
 	InviteCode         string              `json:"invite_code,omitempty"`         // This user's invite code
-	GroupSubscriptions map[string][]string `json:"group_subscriptions,omitempty"` // group ID → member chat IDs
+	GroupSubscriptions map[string][]string `json:"group_subscriptions,omitempty"` // group ID -> member chat IDs
+}
 
-	// Event filtering (v0.7.0)
-	SavedFilters map[string]*filter.FilterPreset `json:"saved_filters,omitempty"` // name → filter preset
+type FilterPreferences struct {
+	SavedFilters map[string]*filter.FilterPreset `json:"saved_filters,omitempty"` // name -> filter preset
 	ActiveFilter string                          `json:"active_filter,omitempty"` // name of active filter
 }
 
@@ -180,30 +183,46 @@ func (p Preferences) GetUser(chatID string) *UserPreferences {
 
 	// Create new user with default preferences
 	p[chatID] = &UserPreferences{
-		States:             []string{},
-		Active:             true,
-		SeenEventIDs:       make(map[string]int64),
-		DigestFrequency:    DigestFrequencyImmediate,
-		DigestHour:         9,
-		DigestDayOfWeek:    1,
-		DaysAhead:          0,    // Disabled by default
-		HidePastEvents:     true, // New users hide past events by default
-		PendingEvents:      []*event.Event{},
-		EventStatuses:      make(map[string]string),
-		ReminderDays:       []int{}, // No reminders by default, user can configure
-		EventNotes:         make(map[string]string),
-		NotifyOnChanges:    true,             // New feature: notify about event changes
-		NotifyOnRemoval:    true,             // New feature: notify about event removals
-		WeeklyStats:        NewWeeklyStats(), // New feature: track weekly stats
-		StatsHistory:       make(map[string]*WeeklyStats),
-		EnableStats:        true,       // Enable stats tracking by default
-		FriendChatIDs:      []string{}, // New feature: friends list
-		PendingInvites:     make(map[string]string),
-		ShareEvents:        false, // Privacy: opt-in only
-		InviteCode:         generateInviteCode(chatID),
-		GroupSubscriptions: make(map[string][]string),
-		SavedFilters:       make(map[string]*filter.FilterPreset), // New feature: saved filters
-		ActiveFilter:       "",                                    // No active filter by default
+		CorePreferences: CorePreferences{
+			States: []string{},
+			Active: true,
+		},
+		DigestPreferences: DigestPreferences{
+			SeenEventIDs:    make(map[string]int64),
+			DigestFrequency: DigestFrequencyImmediate,
+			DigestHour:      9,
+			DigestDayOfWeek: 1,
+			PendingEvents:   []*event.Event{},
+		},
+		EventDisplayPreferences: EventDisplayPreferences{
+			DaysAhead:      0,    // Disabled by default
+			HidePastEvents: true, // New users hide past events by default
+		},
+		EventInteractionPreferences: EventInteractionPreferences{
+			EventStatuses: make(map[string]string),
+			ReminderDays:  []int{}, // No reminders by default, user can configure
+			EventNotes:    make(map[string]string),
+		},
+		NotificationPreferences: NotificationPreferences{
+			NotifyOnChanges: true,
+			NotifyOnRemoval: true,
+		},
+		StatsPreferences: StatsPreferences{
+			WeeklyStats:  NewWeeklyStats(),
+			StatsHistory: make(map[string]*WeeklyStats),
+			EnableStats:  true,
+		},
+		SocialPreferences: SocialPreferences{
+			FriendChatIDs:      []string{},
+			PendingInvites:     make(map[string]string),
+			ShareEvents:        false,
+			InviteCode:         generateInviteCode(chatID),
+			GroupSubscriptions: make(map[string][]string),
+		},
+		FilterPreferences: FilterPreferences{
+			SavedFilters: make(map[string]*filter.FilterPreset),
+			ActiveFilter: "",
+		},
 	}
 	return p[chatID]
 }
