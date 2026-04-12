@@ -170,10 +170,10 @@ jobs:
           go test -v -race ./...
 
       - name: Run linter
-        run: |
-          echo "Running linter before release..."
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
-          golangci-lint run
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
