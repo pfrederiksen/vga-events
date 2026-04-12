@@ -3023,7 +3023,7 @@ func getUpdatesWithTimeout(botToken string, offset int, timeoutSeconds int) ([]U
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Telegram API error (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("telegram API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {
@@ -3036,7 +3036,7 @@ func getUpdatesWithTimeout(botToken string, offset int, timeoutSeconds int) ([]U
 	}
 
 	if !result.OK {
-		return nil, fmt.Errorf("Telegram API returned ok=false")
+		return nil, fmt.Errorf("telegram API returned ok=false")
 	}
 
 	return result.Result, nil
