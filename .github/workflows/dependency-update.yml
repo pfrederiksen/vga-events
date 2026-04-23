@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -113,7 +115,7 @@ jobs:
         id: create_dependency_pr
         continue-on-error: true
         if: steps.check.outputs.updates > 0
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ env.AUTOMATION_PR_TOKEN }}
           commit-message: "Deps: Update Go dependencies"
@@ -150,6 +152,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Check action versions
         id: check-actions
@@ -184,7 +188,7 @@ jobs:
         id: create_actions_pr
         continue-on-error: true
         if: steps.check-actions.outputs.outdated > 0
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ env.AUTOMATION_PR_TOKEN }}
           commit-message: "Deps: Update GitHub Actions versions"
