@@ -1,1 +1,48 @@
-No vulnerabilities found.
+=== Symbol Results ===
+
+Vulnerability #1: GO-2026-5039
+    Arbitrary inputs are included in errors without any escaping in
+    net/textproto
+  More info: https://pkg.go.dev/vuln/GO-2026-5039
+  Standard library
+    Found in: net/textproto@go1.26.2
+    Fixed in: net/textproto@go1.26.4
+    Example traces found:
+      #1: internal/telegram/telegram.go:228:29: telegram.Client.SendDocument calls io.ReadAll, which eventually calls textproto.Reader.ReadMIMEHeader
+
+Vulnerability #2: GO-2026-5037
+    Inefficient candidate hostname parsing in crypto/x509
+  More info: https://pkg.go.dev/vuln/GO-2026-5037
+  Standard library
+    Found in: crypto/x509@go1.26.2
+    Fixed in: crypto/x509@go1.26.4
+    Example traces found:
+      #1: internal/crypto/crypto.go:87:26: crypto.Encryptor.Encrypt calls io.ReadFull, which eventually calls x509.Certificate.Verify
+      #2: internal/crypto/crypto.go:87:26: crypto.Encryptor.Encrypt calls io.ReadFull, which eventually calls x509.Certificate.VerifyHostname
+      #3: internal/preferences/preferences.go:564:20: preferences.GetWeekKey calls fmt.Sprintf, which eventually calls x509.HostnameError.Error
+
+Vulnerability #3: GO-2026-4971
+    Panic in Dial and LookupPort when handling NUL byte on Windows in net
+  More info: https://pkg.go.dev/vuln/GO-2026-4971
+  Standard library
+    Found in: net@go1.26.2
+    Fixed in: net@go1.26.3
+    Example traces found:
+      #1: internal/preferences/gist.go:230:24: preferences.CreateGist calls http.Client.Do, which eventually calls net.Dialer.DialContext
+
+Vulnerability #4: GO-2026-4918
+    Infinite loop in HTTP/2 transport when given bad SETTINGS_MAX_FRAME_SIZE in
+    net/http/internal/http2 in golang.org/x/net
+  More info: https://pkg.go.dev/vuln/GO-2026-4918
+  Standard library
+    Found in: net/http@go1.26.2
+    Fixed in: net/http@go1.26.3
+    Example traces found:
+      #1: internal/preferences/gist.go:230:24: preferences.CreateGist calls http.Client.Do
+      #2: cmd/vga-events-bot/main.go:3018:25: vga.getUpdatesWithTimeout calls http.Client.Get
+
+Your code is affected by 4 vulnerabilities from the Go standard library.
+This scan also found 2 vulnerabilities in packages you import and 18
+vulnerabilities in modules you require, but your code doesn't appear to call
+these vulnerabilities.
+Use '-show verbose' for more details.
