@@ -20,7 +20,12 @@ Welcome to the VGA Events Bot project documentation. This interactive Telegram b
 
 ## Project Overview
 
-**Current Version:** v0.8.3
+**Current Version:** v0.8.4
+
+**v0.8.4**
+
+- Fixed VGA state-event parsing for state championship rows like `2026 NV State Championship` that do not include the usual `NV -` prefix.
+- Updated the project baseline and workflow toolchains to Go `1.26.4`.
 
 **v0.8.3**
 
