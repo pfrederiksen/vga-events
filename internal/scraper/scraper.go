@@ -77,6 +77,7 @@ func (s *Scraper) parseEvents(r io.Reader, sourceURL string) ([]*event.Event, er
 	// Pattern to match date + event on same line: "[Mar 13 2026] UT - Sunbrook Golf Club - St. George"
 	dateEventPattern := regexp.MustCompile(`^\[(.*?)\]\s+([A-Z]{2})\s*-\s*(.+?)\s*-\s*(.+)$`)
 	dateEventPatternNoCity := regexp.MustCompile(`^\[(.*?)\]\s+([A-Z]{2})\s*-\s*(.+)$`)
+	stateChampionshipPattern := regexp.MustCompile(`^(20\d{2})\s+([A-Z]{2})\s+State Championship$`)
 
 	// Get all text content and process line by line to preserve order of dates and events
 	allText := doc.Text()
@@ -153,6 +154,20 @@ func (s *Scraper) parseEvents(r io.Reader, sourceURL string) ([]*event.Event, er
 		// Check if this line is a standalone bracketed date
 		if matches := bracketedDatePattern.FindStringSubmatch(line); matches != nil {
 			currentDate = strings.TrimSpace(matches[1])
+			continue
+		}
+
+		// State championship entries on the live site omit the usual "STATE -" prefix.
+		if matches := stateChampionshipPattern.FindStringSubmatch(line); matches != nil {
+			events = append(events, event.NewEvent(
+				matches[2],
+				line,
+				resolveEventDate(currentDate, line),
+				"",
+				line,
+				sourceURL,
+			))
+			currentDate = "" // Reset after use
 			continue
 		}
 

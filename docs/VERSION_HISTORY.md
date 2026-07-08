@@ -1,8 +1,16 @@
 # Version History
 
-## Current Version: v0.8.3
+## Current Version: v0.8.4
 
-### v0.8.3 (Latest)
+### v0.8.4 (Latest)
+
+**Nevada Event Coverage**
+- Fixed parsing for state championship entries like `2026 NV State Championship` that omit the usual `NV -` event prefix on the VGA public state-events page.
+
+**Go Toolchain Update**
+- Updated the project and GitHub Actions workflows to use Go `1.26.4`.
+
+### v0.8.3
 
 **Go Toolchain Update**
 - Updated the project and GitHub Actions workflows to use Go `1.26.2`.

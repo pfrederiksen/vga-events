@@ -133,6 +133,30 @@ func TestParseEvents_EdgeCases(t *testing.T) {
 			},
 		},
 		{
+			name: "state championship without state prefix",
+			html: `
+				Jul
+				12
+				2026
+				2026 NV State Championship
+			`,
+			wantEventCount: 1,
+			checkEvent: func(t *testing.T, state, title, dateText, city string) {
+				if state != "NV" {
+					t.Errorf("state = %q, want NV", state)
+				}
+				if title != "2026 NV State Championship" {
+					t.Errorf("title = %q, want '2026 NV State Championship'", title)
+				}
+				if dateText != "Jul 12 2026" {
+					t.Errorf("dateText = %q, want 'Jul 12 2026'", dateText)
+				}
+				if city != "" {
+					t.Errorf("city = %q, want empty", city)
+				}
+			},
+		},
+		{
 			name: "multiple date formats",
 			html: `
 				NV - Event 1 4.4.26 - Las Vegas
