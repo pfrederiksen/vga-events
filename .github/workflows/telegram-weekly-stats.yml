@@ -39,6 +39,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_GIST_ID: ${{ secrets.TELEGRAM_GIST_ID }}
           TELEGRAM_GITHUB_TOKEN: ${{ secrets.TELEGRAM_GITHUB_TOKEN }}
+          TELEGRAM_ENCRYPTION_KEY: ${{ secrets.TELEGRAM_ENCRYPTION_KEY }}
         run: |
           echo "📊 Archiving weekly stats for all users..."
           ./vga-events-bot --archive-weekly-stats

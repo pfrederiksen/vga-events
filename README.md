@@ -41,12 +41,12 @@ Get instant notifications for new VGA golf events directly in Telegram!
 
 ### Security & Privacy
 
-✅ **Encrypted** - Your data is protected with AES-256-GCM encryption
+✅ **Encryption available** - Notes, statuses, and invite codes can be protected with AES-256-GCM when `TELEGRAM_ENCRYPTION_KEY` is configured consistently
 ✅ **Rate-limited** - 10 commands/minute to prevent spam
 ✅ **Private** - Each user has separate, isolated preferences
 ✅ **No login required** - Just start chatting!
 ✅ **Structured logging** - Sanitized logs that never expose sensitive data
-✅ **Test coverage** - 82.3% code coverage across core modules
+✅ **Well-tested core** - Core domain packages have extensive automated tests
 
 ---
 
@@ -167,13 +167,16 @@ Check for Nevada events daily at 8 AM:
 Check all states and get notified if new events exist:
 ```bash
 #!/bin/bash
-if vga-events --check-state all; then
-    # Exit code 2 means new events
-    if [ $? -eq 2 ]; then
-        # Send notification
-        vga-events --check-state all | mail -s "New VGA Events" you@example.com
-    fi
-fi
+set +e
+output=$(vga-events --check-state all)
+status=$?
+set -e
+
+case "$status" in
+  0) ;; # no new events
+  2) printf '%s\n' "$output" | mail -s "New VGA Events" you@example.com ;;
+  *) printf 'vga-events failed (exit %s)\n' "$status" >&2; exit "$status" ;;
+esac
 ```
 
 ## Telegram Bot (Interactive + Personalized Notifications)

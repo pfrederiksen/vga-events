@@ -1,6 +1,6 @@
 ## Dependency Update Summary
 
-Go version: 1.26.2
+Go version at the time of this update: 1.26.2 (the current authoritative version is in `go.mod`)
 
 ```diff
 diff --git a/go.mod b/go.mod

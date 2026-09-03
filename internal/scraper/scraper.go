@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,11 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/pfrederiksen/vga-events/internal/event"
 )
+
+// ErrNoEvents indicates that the source page was reachable but did not contain
+// any recognizable events. For the all-state feed this is much more likely to
+// mean that the upstream markup changed than that every event disappeared.
+var ErrNoEvents = errors.New("no recognizable events found")
 
 const (
 	StateEventsURL = "https://vgagolf.org/state-events/"
@@ -52,7 +58,14 @@ func (s *Scraper) FetchEvents() ([]*event.Event, error) {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	return s.parseEvents(resp.Body, s.url)
+	events, err := s.parseEvents(resp.Body, s.url)
+	if err != nil {
+		return nil, err
+	}
+	if len(events) == 0 {
+		return nil, ErrNoEvents
+	}
+	return events, nil
 }
 
 // parseEvents extracts events from HTML

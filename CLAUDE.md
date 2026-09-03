@@ -20,7 +20,14 @@ Welcome to the VGA Events Bot project documentation. This interactive Telegram b
 
 ## Project Overview
 
-**Current Version:** v0.8.4
+**Current Version:** v0.8.5
+
+**v0.8.5**
+
+- Hardened Gist persistence with revision-aware conditional writes, stale-state refreshes, truncated-file support, size limits, and trusted raw URL validation.
+- Made empty upstream scrapes and exhausted notification retries fail visibly instead of masking outages or removals.
+- Passed the encryption key consistently to preference-writing bot workflows and clarified the encryption guarantees in documentation.
+- Corrected the CLI cron example, refreshed test-coverage wording, and removed a generated binary from source control.
 
 **v0.8.4**
 
@@ -56,7 +63,7 @@ Welcome to the VGA Events Bot project documentation. This interactive Telegram b
 - 3 binaries: scraper, notifier, command processor
 - 7 GitHub Actions workflows
 - GitHub Gist for user preferences (no database!)
-- 82.3% test coverage
+- Extensive automated coverage across core packages
 
 ## Documentation Index
 

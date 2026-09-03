@@ -46,7 +46,7 @@ The `main` branch is protected. All changes must go through pull requests.
 - Use `testdata/fixtures/` for test HTML fixtures
 - Run tests: `go test -v ./...`
 - Check coverage: `go test -cover ./...`
-- **Current test coverage: 82.3%** across core modules
+- **Test coverage:** measured in CI and uploaded to Codecov; avoid hard-coding a percentage because it changes with every revision
   - internal/calendar: 98.8%
   - internal/course: 96.0%
   - internal/event: 89.0%

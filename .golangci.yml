@@ -35,6 +35,11 @@ linters:
         - -QF1012
   exclusions:
     generated: lax
+    rules:
+      # Repeated fixture values are clearer inline and are not production constants.
+      - path: _test\.go
+        linters:
+          - goconst
     paths:
       - third_party$
       - builtin$

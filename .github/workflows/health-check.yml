@@ -20,7 +20,7 @@ jobs:
         with:
           script: |
             const workflows = [
-              { name: 'telegram-bot.yml', maxHoursSinceRun: 2 },
+              { name: 'telegram-bot.yml', maxHoursSinceRun: 4 },
               { name: 'telegram-bot-commands.yml', maxHoursSinceRun: 7 },
               { name: 'telegram-daily-digest.yml', maxHoursSinceRun: 25 }
             ];
@@ -35,12 +35,11 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 workflow_id: workflow.name,
-                per_page: 5,
-                status: 'completed'
+                per_page: 5
               });
 
               if (runs.data.workflow_runs.length === 0) {
-                console.log(`❌ No completed runs found for ${workflow.name}`);
+                console.log(`❌ No runs found for ${workflow.name}`);
                 allHealthy = false;
                 continue;
               }
@@ -51,11 +50,14 @@ jobs:
 
               console.log(`  Last run: ${lastRunTime.toISOString()}`);
               console.log(`  Hours since: ${hoursSinceRun.toFixed(1)}`);
-              console.log(`  Status: ${lastRun.conclusion}`);
+              console.log(`  Status: ${lastRun.status}`);
+              console.log(`  Conclusion: ${lastRun.conclusion || 'n/a'}`);
 
               if (hoursSinceRun > workflow.maxHoursSinceRun) {
-                console.log(`❌ ${workflow.name} hasn't run in ${hoursSinceRun.toFixed(1)} hours (max: ${workflow.maxHoursSinceRun})`);
+                console.log(`❌ ${workflow.name} hasn't updated in ${hoursSinceRun.toFixed(1)} hours (max: ${workflow.maxHoursSinceRun})`);
                 allHealthy = false;
+              } else if (lastRun.status !== 'completed') {
+                console.log(`✅ ${workflow.name} is currently ${lastRun.status}`);
               } else if (lastRun.conclusion !== 'success') {
                 console.log(`❌ ${workflow.name} last run failed: ${lastRun.conclusion}`);
                 allHealthy = false;

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -286,7 +287,7 @@ func main() {
 	}()
 
 	if *loop {
-		runLoop(storage, prefs, *botToken, *dryRun, *loopDuration, rateLimiter)
+		runLoop(storage, *botToken, *dryRun, *loopDuration, rateLimiter)
 	} else {
 		runOnce(storage, prefs, *botToken, *dryRun, rateLimiter)
 	}
@@ -332,7 +333,7 @@ func sendResponse(botToken, chatID, response string, initialEvents []*event.Even
 	}
 }
 
-func runLoop(storage *preferences.GistStorage, prefs preferences.Preferences, botToken string, dryRun bool, duration time.Duration, rateLimiter *RateLimiter) {
+func runLoop(storage *preferences.GistStorage, botToken string, dryRun bool, duration time.Duration, rateLimiter *RateLimiter) {
 	fmt.Printf("Starting long polling loop (will run for %v)...\n", duration)
 	startTime := time.Now()
 	offset := 0
@@ -359,6 +360,18 @@ func runLoop(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 
 		fmt.Printf("Processing %d message(s)...\n", len(updates))
 
+		// The loop can live for hours while notification and digest jobs also
+		// update the Gist. Reload immediately before applying commands so we do
+		// not base a user's change on a stale snapshot. Save() also uses the
+		// loaded ETag to catch the remaining narrow race window.
+		latestPrefs, err := storage.Load()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error refreshing preferences: %v\n", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		prefs := latestPrefs
+
 		prefsModified := false
 
 		// Process each update
@@ -378,6 +391,10 @@ func runLoop(storage *preferences.GistStorage, prefs preferences.Preferences, bo
 			} else {
 				if err := storage.Save(prefs); err != nil {
 					fmt.Fprintf(os.Stderr, "Error saving preferences: %v\n", err)
+					if errors.Is(err, preferences.ErrGistConflict) {
+						fmt.Fprintln(os.Stderr, "Preferences changed concurrently; stopping before overwriting newer data")
+						return
+					}
 				} else {
 					fmt.Println("Preferences saved successfully")
 				}

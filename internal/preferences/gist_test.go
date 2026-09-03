@@ -206,19 +206,16 @@ func TestCreateGist(t *testing.T) {
 				}
 			}))
 			defer server.Close()
+			originalURL := gistAPIURL
+			gistAPIURL = server.URL + "/gists"
+			defer func() { gistAPIURL = originalURL }()
 
-			// Temporarily replace the gistAPIURL (in real code, we'd need to make this configurable)
-			// For this test, we'll need to modify CreateGist or use a different approach
-			// Since we can't easily override the constant, we'll just verify the error case
-
-			// This test is limited because we can't override the gistAPIURL constant
-			// In a real scenario, we'd refactor CreateGist to accept a base URL parameter
-			_, err := CreateGist(tt.githubToken, tt.description)
-
-			// We expect an error because we can't point to our test server with the current implementation
-			// This test primarily validates input validation
-			if tt.githubToken == "" && err == nil {
-				t.Error("CreateGist() expected error for empty token")
+			gistID, err := CreateGist(tt.githubToken, tt.description)
+			if (err != nil) != tt.wantError {
+				t.Fatalf("CreateGist() error = %v, wantError %v", err, tt.wantError)
+			}
+			if gistID != tt.wantGistID {
+				t.Errorf("CreateGist() ID = %q, want %q", gistID, tt.wantGistID)
 			}
 		})
 	}

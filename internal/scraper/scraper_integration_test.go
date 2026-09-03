@@ -45,7 +45,7 @@ func TestFetchEvents(t *testing.T) {
 				</html>
 			`,
 			statusCode:    http.StatusOK,
-			wantError:     false,
+			wantError:     true,
 			wantMinEvents: 0,
 		},
 	}

@@ -1,8 +1,22 @@
 # Version History
 
-## Current Version: v0.8.4
+## Current Version: v0.8.5
 
-### v0.8.4 (Latest)
+### v0.8.5 (Latest)
+
+**Gist Storage Reliability**
+- Added revision-aware conditional writes so concurrent preference changes fail safely instead of being silently overwritten.
+- Long-running bot sessions now refresh preferences immediately before applying command batches.
+- Added support for GitHub's truncated Gist responses, a 10 MiB safety limit, and trusted-host validation for raw content downloads.
+- Updated GitHub API authentication and version headers and expanded HTTP-level and race-test coverage.
+
+**Operational Safety**
+- Empty event scrapes now signal a likely upstream format change instead of resembling removal of every event.
+- Notification checks fail visibly after retries are exhausted so health monitoring can detect outages.
+- Encryption keys are passed consistently to preference-writing bot workflows.
+- Corrected the documented cron exit-code handling and removed a generated test binary from source control.
+
+### v0.8.4
 
 **Nevada Event Coverage**
 - Fixed parsing for state championship entries like `2026 NV State Championship` that omit the usual `NV -` event prefix on the VGA public state-events page.

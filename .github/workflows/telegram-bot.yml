@@ -73,6 +73,14 @@ jobs:
             fi
           done
 
+          # A failed scrape must not look like a healthy notification run. Keeping
+          # the previous snapshot is correct, but masking the failure prevents the
+          # health check and alerts from detecting an outage.
+          if [ $EXIT_CODE -eq 1 ]; then
+            echo "::error::Event check failed after $MAX_RETRIES attempts"
+            exit 1
+          fi
+
           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
 
           if [ $EXIT_CODE -eq 2 ]; then
@@ -272,10 +280,7 @@ jobs:
           if [ "${{ steps.check.outputs.new_events }}" == "true" ]; then
             echo "✅ Found new events and sent personalized notifications to subscribed users"
           elif [ "${{ steps.check.outputs.exit_code }}" == "1" ]; then
-            # Don't fail the workflow for transient network errors (DNS timeouts, etc.)
-            # The workflow runs hourly so the next run will retry
-            echo "⚠️ Error checking for events (likely transient network issue)"
-            echo "::warning::Failed to reach vgagolf.org - will retry on next scheduled run"
+            echo "❌ Event check failed after retries"
           else
             echo "ℹ️ No new events found"
           fi

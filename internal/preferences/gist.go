@@ -3,19 +3,29 @@ package preferences
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/pfrederiksen/vga-events/internal/crypto"
 )
 
 const (
-	gistAPIURL   = "https://api.github.com/gists"
 	gistFilename = "preferences.json"
 	timeout      = 15 * time.Second
+	maxGistBytes = 10 << 20
 )
+
+var gistAPIURL = "https://api.github.com/gists"
+
+// ErrGistConflict means the Gist changed after it was loaded. Callers must
+// reload and reapply their mutation rather than overwrite the newer revision.
+var ErrGistConflict = errors.New("preferences gist changed concurrently")
 
 // GistStorage implements Storage using GitHub Gists
 type GistStorage struct {
@@ -23,6 +33,8 @@ type GistStorage struct {
 	githubToken string
 	httpClient  *http.Client
 	encryptor   *crypto.Encryptor
+	mu          sync.Mutex
+	etag        string
 }
 
 // NewGistStorage creates a new Gist-based storage
@@ -60,8 +72,9 @@ func newGitHubAPIRequest(method, url, githubToken string, body io.Reader) (*http
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("token %s", githubToken))
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", githubToken))
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -71,11 +84,43 @@ func newGitHubAPIRequest(method, url, githubToken string, body io.Reader) (*http
 }
 
 func checkGitHubAPIStatus(resp *http.Response, expectedStatus int) error {
+	if resp.StatusCode == http.StatusPreconditionFailed || resp.StatusCode == http.StatusConflict {
+		return ErrGistConflict
+	}
 	if resp.StatusCode != expectedStatus {
 		// Don't include response body in error to prevent information leakage
 		return fmt.Errorf("GitHub API error (status %d)", resp.StatusCode)
 	}
 
+	return nil
+}
+
+func readLimited(body io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, maxGistBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxGistBytes {
+		return nil, fmt.Errorf("preferences exceed %d-byte safety limit", maxGistBytes)
+	}
+	return data, nil
+}
+
+func validateRawURL(rawURL string) error {
+	raw, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid preferences raw URL")
+	}
+	api, err := url.Parse(gistAPIURL)
+	if err != nil {
+		return fmt.Errorf("invalid configured Gist API URL")
+	}
+	if raw.Host == "gist.githubusercontent.com" && raw.Scheme != "https" {
+		return fmt.Errorf("preferences raw URL must use HTTPS")
+	}
+	if raw.Host != "gist.githubusercontent.com" && (raw.Host != api.Host || raw.Scheme != api.Scheme) {
+		return fmt.Errorf("untrusted preferences raw URL host")
+	}
 	return nil
 }
 
@@ -97,10 +142,15 @@ func (g *GistStorage) Load() (Preferences, error) {
 	if err := checkGitHubAPIStatus(resp, http.StatusOK); err != nil {
 		return nil, err
 	}
+	g.mu.Lock()
+	g.etag = resp.Header.Get("ETag")
+	g.mu.Unlock()
 
 	var gistResp struct {
 		Files map[string]struct {
-			Content string `json:"content"`
+			Content   string `json:"content"`
+			RawURL    string `json:"raw_url"`
+			Truncated bool   `json:"truncated"`
 		} `json:"files"`
 	}
 
@@ -113,8 +163,33 @@ func (g *GistStorage) Load() (Preferences, error) {
 		// File doesn't exist yet, return empty preferences
 		return NewPreferences(), nil
 	}
+	content := []byte(file.Content)
+	if file.Truncated {
+		if file.RawURL == "" {
+			return nil, fmt.Errorf("preferences file is truncated but has no raw URL")
+		}
+		if err := validateRawURL(file.RawURL); err != nil {
+			return nil, err
+		}
+		rawReq, err := newGitHubAPIRequest(http.MethodGet, file.RawURL, g.githubToken, nil)
+		if err != nil {
+			return nil, err
+		}
+		rawResp, err := g.httpClient.Do(rawReq)
+		if err != nil {
+			return nil, fmt.Errorf("fetching complete preferences: %w", err)
+		}
+		defer rawResp.Body.Close()
+		if err := checkGitHubAPIStatus(rawResp, http.StatusOK); err != nil {
+			return nil, err
+		}
+		content, err = readLimited(rawResp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("reading complete preferences: %w", err)
+		}
+	}
 
-	prefs, err := FromJSON([]byte(file.Content))
+	prefs, err := FromJSON(content)
 	if err != nil {
 		return nil, fmt.Errorf("parsing preferences: %w", err)
 	}
@@ -141,6 +216,9 @@ func (g *GistStorage) Load() (Preferences, error) {
 
 // Save updates the Gist with new preferences
 func (g *GistStorage) Save(prefs Preferences) error {
+	if prefs == nil {
+		return fmt.Errorf("preferences are required")
+	}
 	// Encrypt sensitive fields if encryptor is configured
 	if g.encryptor != nil {
 		// Create a copy to avoid modifying the original
@@ -180,6 +258,12 @@ func (g *GistStorage) Save(prefs Preferences) error {
 	if err != nil {
 		return err
 	}
+	g.mu.Lock()
+	etag := g.etag
+	g.mu.Unlock()
+	if etag != "" {
+		req.Header.Set("If-Match", etag)
+	}
 
 	resp, err := g.httpClient.Do(req)
 	if err != nil {
@@ -190,6 +274,9 @@ func (g *GistStorage) Save(prefs Preferences) error {
 	if err := checkGitHubAPIStatus(resp, http.StatusOK); err != nil {
 		return err
 	}
+	g.mu.Lock()
+	g.etag = resp.Header.Get("ETag")
+	g.mu.Unlock()
 
 	return nil
 }
@@ -244,6 +331,9 @@ func CreateGist(githubToken, description string) (string, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&gistResp); err != nil {
 		return "", fmt.Errorf("decoding response: %w", err)
 	}
+	if strings.TrimSpace(gistResp.ID) == "" {
+		return "", fmt.Errorf("GitHub API returned an empty gist ID")
+	}
 
 	return gistResp.ID, nil
 }
@@ -255,6 +345,9 @@ func (g *GistStorage) transformSensitiveFields(prefs Preferences, mapTransform f
 	}
 
 	for _, userPrefs := range prefs {
+		if userPrefs == nil {
+			continue
+		}
 		// Transform event notes
 		if len(userPrefs.EventNotes) > 0 {
 			transformed, err := mapTransform(userPrefs.EventNotes)
