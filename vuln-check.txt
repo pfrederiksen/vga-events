@@ -1,48 +1,61 @@
 === Symbol Results ===
 
-Vulnerability #1: GO-2026-5039
-    Arbitrary inputs are included in errors without any escaping in
-    net/textproto
-  More info: https://pkg.go.dev/vuln/GO-2026-5039
+Vulnerability #1: GO-2026-6218
+    Avoid quadratic complexity in resolvePath in net/url
+  More info: https://pkg.go.dev/vuln/GO-2026-6218
   Standard library
-    Found in: net/textproto@go1.26.2
-    Fixed in: net/textproto@go1.26.4
+    Found in: net/url@go1.26.4
+    Fixed in: net/url@go1.26.6
     Example traces found:
-      #1: internal/telegram/telegram.go:228:29: telegram.Client.SendDocument calls io.ReadAll, which eventually calls textproto.Reader.ReadMIMEHeader
+      #1: internal/preferences/gist.go:317:24: preferences.CreateGist calls http.Client.Do, which eventually calls url.URL.Parse
 
-Vulnerability #2: GO-2026-5037
-    Inefficient candidate hostname parsing in crypto/x509
-  More info: https://pkg.go.dev/vuln/GO-2026-5037
+Vulnerability #2: GO-2026-6090
+    Limit handshake messages we are willing to accept post-handshake in
+    crypto/tls
+  More info: https://pkg.go.dev/vuln/GO-2026-6090
   Standard library
-    Found in: crypto/x509@go1.26.2
-    Fixed in: crypto/x509@go1.26.4
+    Found in: crypto/tls@go1.26.4
+    Fixed in: crypto/tls@go1.26.6
     Example traces found:
-      #1: internal/crypto/crypto.go:87:26: crypto.Encryptor.Encrypt calls io.ReadFull, which eventually calls x509.Certificate.Verify
-      #2: internal/crypto/crypto.go:87:26: crypto.Encryptor.Encrypt calls io.ReadFull, which eventually calls x509.Certificate.VerifyHostname
-      #3: internal/preferences/preferences.go:564:20: preferences.GetWeekKey calls fmt.Sprintf, which eventually calls x509.HostnameError.Error
+      #1: internal/preferences/gist.go:317:24: preferences.CreateGist calls http.Client.Do, which eventually calls tls.Conn.HandshakeContext
+      #2: internal/crypto/crypto.go:87:26: crypto.Encryptor.Encrypt calls io.ReadFull, which eventually calls tls.Conn.Read
+      #3: cmd/vga-events-telegram/main.go:386:14: vga.main calls fmt.Fprintf, which calls tls.Conn.Write
+      #4: internal/preferences/gist.go:317:24: preferences.CreateGist calls http.Client.Do, which eventually calls tls.Dialer.DialContext
 
-Vulnerability #3: GO-2026-4971
-    Panic in Dial and LookupPort when handling NUL byte on Windows in net
-  More info: https://pkg.go.dev/vuln/GO-2026-4971
+Vulnerability #3: GO-2026-5972
+    Enforce maximum recursion depth in encoding/asn1
+  More info: https://pkg.go.dev/vuln/GO-2026-5972
   Standard library
-    Found in: net@go1.26.2
-    Fixed in: net@go1.26.3
+    Found in: encoding/asn1@go1.26.4
+    Fixed in: encoding/asn1@go1.26.6
     Example traces found:
-      #1: internal/preferences/gist.go:230:24: preferences.CreateGist calls http.Client.Do, which eventually calls net.Dialer.DialContext
+      #1: internal/preferences/gist.go:321:2: preferences.CreateGist calls http.cancelTimerBody.Close, which eventually calls asn1.Unmarshal
 
-Vulnerability #4: GO-2026-4918
-    Infinite loop in HTTP/2 transport when given bad SETTINGS_MAX_FRAME_SIZE in
-    net/http/internal/http2 in golang.org/x/net
-  More info: https://pkg.go.dev/vuln/GO-2026-4918
+Vulnerability #4: GO-2026-5856
+    Invoking Encrypted Client Hello privacy leak in crypto/tls
+  More info: https://pkg.go.dev/vuln/GO-2026-5856
   Standard library
-    Found in: net/http@go1.26.2
-    Fixed in: net/http@go1.26.3
+    Found in: crypto/tls@go1.26.4
+    Fixed in: crypto/tls@go1.26.5
     Example traces found:
-      #1: internal/preferences/gist.go:230:24: preferences.CreateGist calls http.Client.Do
-      #2: cmd/vga-events-bot/main.go:3018:25: vga.getUpdatesWithTimeout calls http.Client.Get
+      #1: internal/preferences/gist.go:317:24: preferences.CreateGist calls http.Client.Do, which eventually calls tls.Conn.HandshakeContext
+      #2: internal/crypto/crypto.go:87:26: crypto.Encryptor.Encrypt calls io.ReadFull, which eventually calls tls.Conn.Read
+      #3: cmd/vga-events-telegram/main.go:386:14: vga.main calls fmt.Fprintf, which calls tls.Conn.Write
+      #4: internal/preferences/gist.go:317:24: preferences.CreateGist calls http.Client.Do, which eventually calls tls.Dialer.DialContext
 
-Your code is affected by 4 vulnerabilities from the Go standard library.
-This scan also found 2 vulnerabilities in packages you import and 18
+Vulnerability #5: GO-2026-5026
+    Invoking failure to reject ASCII-only Punycode-encoded labels in
+    golang.org/x/net/idna
+  More info: https://pkg.go.dev/vuln/GO-2026-5026
+  Standard library
+    Found in: net/http@go1.26.4
+    Fixed in: net/http@go1.26.6
+    Example traces found:
+      #1: internal/preferences/gist.go:317:24: preferences.CreateGist calls http.Client.Do
+      #2: cmd/vga-events-bot/main.go:3035:25: vga.getUpdatesWithTimeout calls http.Client.Get
+
+Your code is affected by 5 vulnerabilities from the Go standard library.
+This scan also found 3 vulnerabilities in packages you import and 19
 vulnerabilities in modules you require, but your code doesn't appear to call
 these vulnerabilities.
 Use '-show verbose' for more details.
