@@ -69,3 +69,14 @@ The `main` branch is protected. All changes must go through pull requests.
 - Use `--refresh` to reset state for testing
 
 See [DEBUGGING.md](DEBUGGING.md) for detailed debugging techniques.
+
+## Gist persistence
+
+GitHub does not support conditional `PATCH` requests on Gists. Before saving a
+loaded revision, the storage checks its ETag using a conditional GET with
+`If-None-Match`. Only `304 Not Modified` permits the write; changed state or a
+failed revision check aborts the save. This is best-effort stale-state detection,
+not atomic compare-and-swap: a concurrent writer can still race between GET and
+PATCH. Callers must reload and reapply their mutation after `ErrGistConflict`.
+
+Reference: [GitHub REST API conditional requests](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#use-conditional-requests-if-appropriate).
