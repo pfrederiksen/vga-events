@@ -56,28 +56,52 @@ func TestGistStorageLoadTruncatedFile(t *testing.T) {
 	}
 }
 
-func TestGistStorageSaveUsesLoadedRevision(t *testing.T) {
-	withGistTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			w.Header().Set("ETag", `"revision-1"`)
-			_, _ = w.Write([]byte(`{"files":{"preferences.json":{"content":"{}"}}}`))
-		case http.MethodPatch:
-			if r.Header.Get("If-Match") != `"revision-1"` {
-				t.Errorf("If-Match = %q", r.Header.Get("If-Match"))
+func TestGistStorageSaveChecksLoadedRevision(t *testing.T) {
+	for _, status := range []int{http.StatusNotModified, http.StatusOK, http.StatusForbidden, http.StatusInternalServerError} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			patches := 0
+			withGistTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					if etag := r.Header.Get("If-None-Match"); etag != "" {
+						if etag != `"revision-1"` {
+							t.Errorf("If-None-Match = %q", etag)
+						}
+						w.WriteHeader(status)
+						return
+					}
+					w.Header().Set("ETag", `"revision-1"`)
+					_, _ = w.Write([]byte(`{"files":{"preferences.json":{"content":"{}"}}}`))
+				case http.MethodPatch:
+					patches++
+					// GitHub rejects conditional requests on unsafe methods.
+					if r.Header.Get("If-Match") != "" || r.Header.Get("If-None-Match") != "" {
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					w.Header().Set("ETag", `"revision-2"`)
+					_, _ = w.Write([]byte(`{}`))
+				}
+			}))
+			storage, _ := NewGistStorage("gist", "token")
+			prefs, err := storage.Load()
+			if err != nil {
+				t.Fatal(err)
 			}
-			w.WriteHeader(http.StatusPreconditionFailed)
-		}
-	}))
-
-	storage, _ := NewGistStorage("gist", "token")
-	prefs, err := storage.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = storage.Save(prefs)
-	if !errors.Is(err, ErrGistConflict) {
-		t.Fatalf("Save() error = %v, want ErrGistConflict", err)
+			err = storage.Save(prefs)
+			if status == http.StatusNotModified {
+				if err != nil || patches != 1 || storage.etag != `"revision-2"` {
+					t.Fatalf("Save() = %v, patches = %d, etag = %q", err, patches, storage.etag)
+				}
+			} else {
+				if err == nil || patches != 0 {
+					t.Fatalf("Save() = %v, patches = %d; want error without writing", err, patches)
+				}
+				if status == http.StatusOK && !errors.Is(err, ErrGistConflict) {
+					t.Fatalf("Save() = %v, want ErrGistConflict", err)
+				}
+			}
+		})
 	}
 }
 

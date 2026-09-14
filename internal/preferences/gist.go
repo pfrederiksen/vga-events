@@ -214,6 +214,35 @@ func (g *GistStorage) Load() (Preferences, error) {
 	return prefs, nil
 }
 
+// checkRevision detects stale state using GitHub's supported conditional GET.
+// GitHub does not support conditional PATCH requests. This check is best-effort:
+// another writer can still change the Gist between this GET and the PATCH.
+func (g *GistStorage) checkRevision(url string) error {
+	g.mu.Lock()
+	etag := g.etag
+	g.mu.Unlock()
+	if etag == "" {
+		return nil
+	}
+	req, err := newGitHubAPIRequest(http.MethodGet, url, g.githubToken, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("If-None-Match", etag)
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("checking gist revision: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotModified {
+		return nil
+	}
+	if err := checkGitHubAPIStatus(resp, http.StatusOK); err != nil {
+		return err
+	}
+	return ErrGistConflict
+}
+
 // Save updates the Gist with new preferences
 func (g *GistStorage) Save(prefs Preferences) error {
 	if prefs == nil {
@@ -258,11 +287,8 @@ func (g *GistStorage) Save(prefs Preferences) error {
 	if err != nil {
 		return err
 	}
-	g.mu.Lock()
-	etag := g.etag
-	g.mu.Unlock()
-	if etag != "" {
-		req.Header.Set("If-Match", etag)
+	if err := g.checkRevision(url); err != nil {
+		return err
 	}
 
 	resp, err := g.httpClient.Do(req)
